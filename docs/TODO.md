@@ -20,6 +20,7 @@
 - [x] Configure Framer Motion
 - [x] Create layout components
 - [x] Create home page
+- [x] Set up dark mode theme provider
 
 ### Authentication
 - [ ] Implement Supabase auth integration
@@ -34,6 +35,7 @@
 - [ ] Create message bubbles with typing indicators
 - [ ] Implement message history loading
 - [ ] Create model selection dropdown
+- [ ] Implement streaming message display
 
 ### User Dashboard
 - [ ] Create dashboard layout
@@ -47,10 +49,11 @@
 - [ ] Implement knowledge graph visualization
 - [ ] Create insights categories list
 - [ ] Implement insights filtering
+- [ ] Create insights export functionality
 
 ### Responsiveness & Design
 - [ ] Implement responsive layout for mobile
-- [ ] Implement dark mode toggle
+- [x] Implement dark mode toggle
 - [ ] Add animations for UI interactions
 - [ ] Create loading states and skeletons
 - [ ] Implement error states and messages
@@ -65,15 +68,17 @@
 - [x] Create API documentation with Swagger
 
 ### Authentication
+- [x] Create security utilities for JWT
 - [ ] Set up Supabase auth hooks
-- [ ] Implement JWT validation
+- [ ] Implement JWT validation middleware
 - [ ] Create authentication middleware
 - [ ] Set up user roles and permissions
 
 ### Database
 - [x] Set up Supabase client
 - [x] Create Neo4j client
-- [ ] Implement CRUD operations
+- [x] Create DB models and schemas
+- [x] Implement CRUD operations
 - [ ] Create database migration scripts
 
 ### Neo4j Knowledge Graph
@@ -102,6 +107,7 @@
 - [x] Create pattern recognition algorithms
 - [x] Implement periodic insight generation
 - [ ] Create notification system for new insights
+- [ ] Develop trend analysis for long-term patterns
 
 ## API Development
 - [ ] Create chat API endpoints
@@ -141,3 +147,4 @@
 - [ ] Create developer onboarding guide
 - [ ] Document database schema
 - [ ] Create architecture diagrams
+- [ ] Write user guide for self-reflection techniques
