@@ -29,3 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created knowledge graph service for entity and concept extraction
 - Implemented insights service for generating user insights
 - Added chat service with streaming response support
+- Implemented dark mode theming support
+- Created core database models and schemas
+- Implemented knowledge extraction from conversations
+- Added pattern recognition for user behavior analysis
+- Created service for periodically generating user insights
+- Implemented RAG system with semantic search functionality
+- Added conversation context retrieval for personalized responses
+
+### Core Features Implemented
+- Multi-model LLM support with OpenAI and Anthropic
+- Knowledge graph with Neo4j for building connections between user information
+- Persistent memory with mem0 integration
+- Natural language insights extraction
+- Pattern recognition for user behavior
+- Dark mode UI
+
+### In Progress
+- Chat interface components
+- Authentication flow implementation
+- Insights visualization 
+- User dashboard development
+- API endpoints creation
