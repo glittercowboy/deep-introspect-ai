@@ -1,188 +1,354 @@
 """
 Chat API routes.
 """
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Path, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from app.api.models.chat import (
-    ConversationCreate,
-    ConversationResponse,
-    MessageCreate,
-    MessageResponse,
-    ConversationListResponse
-)
-from app.api.models.user import User
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+import asyncio
+
 from app.services.chat.chat_service import chat_service
-from app.api.dependencies.auth import get_current_user
+from app.api.routes.auth import get_current_user
+from app.core.exceptions import NotFoundError
 
-router = APIRouter(prefix="/v1/chat", tags=["Chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
 
-@router.post("/conversations", response_model=ConversationResponse)
+# Models for request and response
+class Message(BaseModel):
+    """Message model."""
+    id: str
+    role: str
+    content: str
+    created_at: datetime
+    metadata: Optional[Dict[str, Any]] = None
+
+class Conversation(BaseModel):
+    """Conversation model."""
+    id: str
+    user_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    model: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class ConversationCreate(BaseModel):
+    """Conversation creation model."""
+    title: Optional[str] = None
+    model: Optional[str] = "anthropic"
+    metadata: Optional[Dict[str, Any]] = None
+
+class MessageCreate(BaseModel):
+    """Message creation model."""
+    content: str = Field(..., min_length=1)
+    model: Optional[str] = "anthropic"
+    metadata: Optional[Dict[str, Any]] = None
+
+class ConversationSummary(BaseModel):
+    """Conversation summary model."""
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    last_message: Optional[str] = None
+    message_count: int = 0
+
+@router.post("/conversations", response_model=Conversation)
 async def create_conversation(
     conversation_data: ConversationCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a new conversation.
+    
+    Args:
+        conversation_data: Conversation data
+        current_user: Current user data
+        
+    Returns:
+        Created conversation
     """
+    user_id = current_user["id"]
+    
     conversation = await chat_service.start_conversation(
-        user_id=current_user.id,
+        user_id,
         title=conversation_data.title
     )
     
-    return conversation
-
-@router.get("/conversations", response_model=ConversationListResponse)
-async def list_conversations(
-    current_user: User = Depends(get_current_user),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-):
-    """
-    List all conversations for the current user.
-    """
-    from app.db.supabase import supabase_client
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create conversation"
+        )
     
-    conversations = await supabase_client.get_conversations(current_user.id)
-    
-    # Apply pagination
-    paginated_conversations = conversations[offset:offset+limit]
-    
+    # Process the conversation metadata before returning
     return {
-        "conversations": paginated_conversations,
-        "total": len(conversations),
-        "limit": limit,
-        "offset": offset
+        "id": conversation["id"],
+        "user_id": conversation["user_id"],
+        "title": conversation["title"],
+        "created_at": datetime.fromisoformat(conversation["created_at"]),
+        "updated_at": datetime.fromisoformat(conversation["updated_at"]),
+        "model": conversation.get("model", "anthropic"),
+        "metadata": conversation.get("metadata", {})
     }
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
-async def get_conversation(
-    conversation_id: str = Path(..., title="The ID of the conversation to get"),
-    current_user: User = Depends(get_current_user)
-):
+@router.get("/conversations", response_model=List[ConversationSummary])
+async def list_conversations(current_user: Dict[str, Any] = Depends(get_current_user)):
     """
-    Get a specific conversation.
+    List all conversations for the current user.
+    
+    Args:
+        current_user: Current user data
+        
+    Returns:
+        List of conversations
     """
-    from app.db.supabase import supabase_client
+    user_id = current_user["id"]
     
-    conversation = await supabase_client.get_conversation(conversation_id)
+    # Get all conversations for the user
+    conversations = await chat_service.get_user_conversations(user_id)
     
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    # Format the response
+    result = []
+    for conv in conversations:
+        # Get the most recent message for this conversation
+        messages = await chat_service.get_conversation_history(conv["id"])
+        
+        last_message = None
+        if messages:
+            last_message_obj = messages[-1]
+            if last_message_obj["role"] == "assistant":
+                last_message = last_message_obj["content"][:100] + "..." if len(last_message_obj["content"]) > 100 else last_message_obj["content"]
+        
+        result.append({
+            "id": conv["id"],
+            "title": conv["title"],
+            "created_at": datetime.fromisoformat(conv["created_at"]),
+            "updated_at": datetime.fromisoformat(conv["updated_at"]),
+            "last_message": last_message,
+            "message_count": len(messages)
+        })
     
-    # Check if the conversation belongs to the user
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    # Sort by updated_at
+    result.sort(key=lambda c: c["updated_at"], reverse=True)
     
-    return conversation
+    return result
 
-@router.get("/conversations/{conversation_id}/messages", response_model=List[MessageResponse])
-async def get_conversation_messages(
-    conversation_id: str = Path(..., title="The ID of the conversation to get messages for"),
-    current_user: User = Depends(get_current_user)
+@router.get("/conversations/{conversation_id}", response_model=Conversation)
+async def get_conversation(
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get all messages for a specific conversation.
-    """
-    from app.db.supabase import supabase_client
+    Get a conversation by ID.
     
-    # Verify that the conversation exists and belongs to the user
-    conversation = await supabase_client.get_conversation(conversation_id)
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current user data
+        
+    Returns:
+        Conversation data
+    """
+    user_id = current_user["id"]
+    
+    # Get the conversation
+    conversation = await chat_service.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError(f"Conversation {conversation_id} not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    # Check that the conversation belongs to the user
+    if conversation["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
     
-    # Get messages
+    # Process the conversation metadata before returning
+    return {
+        "id": conversation["id"],
+        "user_id": conversation["user_id"],
+        "title": conversation["title"],
+        "created_at": datetime.fromisoformat(conversation["created_at"]),
+        "updated_at": datetime.fromisoformat(conversation["updated_at"]),
+        "model": conversation.get("model", "anthropic"),
+        "metadata": conversation.get("metadata", {})
+    }
+
+@router.get("/conversations/{conversation_id}/messages", response_model=List[Message])
+async def get_conversation_messages(
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get all messages for a conversation.
+    
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current user data
+        
+    Returns:
+        List of messages
+    """
+    user_id = current_user["id"]
+    
+    # Get the conversation
+    conversation = await chat_service.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError(f"Conversation {conversation_id} not found")
+    
+    # Check that the conversation belongs to the user
+    if conversation["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
+    
+    # Get the messages
     messages = await chat_service.get_conversation_history(conversation_id)
     
-    return messages
+    # Format the response
+    result = []
+    for msg in messages:
+        result.append({
+            "id": msg["id"],
+            "role": msg["role"],
+            "content": msg["content"],
+            "created_at": datetime.fromisoformat(msg["created_at"]),
+            "metadata": msg.get("metadata", {})
+        })
+    
+    return result
 
-@router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
-async def send_message(
+@router.post("/conversations/{conversation_id}/messages", response_model=Message)
+async def create_message(
+    conversation_id: str,
     message_data: MessageCreate,
-    conversation_id: str = Path(..., title="The ID of the conversation to send the message to"),
-    current_user: User = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Send a message in a conversation.
-    """
-    from app.db.supabase import supabase_client
+    Send a message to a conversation.
     
-    # Verify that the conversation exists and belongs to the user
-    conversation = await supabase_client.get_conversation(conversation_id)
+    Args:
+        conversation_id: Conversation ID
+        message_data: Message data
+        current_user: Current user data
+        
+    Returns:
+        Assistant response message
+    """
+    user_id = current_user["id"]
+    
+    # Get the conversation
+    conversation = await chat_service.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError(f"Conversation {conversation_id} not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    # Check that the conversation belongs to the user
+    if conversation["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
     
-    # Send message and get response
+    # Send the message and get the response
     response = await chat_service.send_message(
-        conversation_id=conversation_id,
-        user_id=current_user.id,
-        content=message_data.content
+        conversation_id,
+        user_id,
+        message_data.content
     )
     
-    return response
+    # Format the response
+    return {
+        "id": response["id"],
+        "role": response["role"],
+        "content": response["content"],
+        "created_at": datetime.fromisoformat(response["created_at"]),
+        "metadata": response.get("metadata", {})
+    }
 
 @router.post("/conversations/{conversation_id}/messages/stream")
-async def stream_message(
+async def create_message_stream(
+    conversation_id: str,
     message_data: MessageCreate,
-    conversation_id: str = Path(..., title="The ID of the conversation to send the message to"),
-    current_user: User = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Send a message in a conversation and stream the response.
-    """
-    from app.db.supabase import supabase_client
+    Send a message to a conversation and stream the response.
     
-    # Verify that the conversation exists and belongs to the user
-    conversation = await supabase_client.get_conversation(conversation_id)
+    Args:
+        conversation_id: Conversation ID
+        message_data: Message data
+        current_user: Current user data
+        
+    Returns:
+        Streaming response of assistant message chunks
+    """
+    user_id = current_user["id"]
+    
+    # Get the conversation
+    conversation = await chat_service.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError(f"Conversation {conversation_id} not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    # Check that the conversation belongs to the user
+    if conversation["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
     
-    # Stream response
-    async def response_generator():
+    # Create a generator for the streaming response
+    async def generate():
         async for chunk in chat_service.stream_message(
-            conversation_id=conversation_id,
-            user_id=current_user.id,
-            content=message_data.content
+            conversation_id,
+            user_id,
+            message_data.content
         ):
+            # Yield the chunk as a server-sent event
             yield f"data: {chunk}\n\n"
     
+    # Return a streaming response
     return StreamingResponse(
-        response_generator(),
+        generate(),
         media_type="text/event-stream"
     )
 
 @router.get("/conversations/{conversation_id}/summary")
 async def get_conversation_summary(
-    conversation_id: str = Path(..., title="The ID of the conversation to summarize"),
-    current_user: User = Depends(get_current_user)
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get a summary of a conversation.
-    """
-    from app.db.supabase import supabase_client
     
-    # Verify that the conversation exists and belongs to the user
-    conversation = await supabase_client.get_conversation(conversation_id)
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current user data
+        
+    Returns:
+        Conversation summary
+    """
+    user_id = current_user["id"]
+    
+    # Get the conversation
+    conversation = await chat_service.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError(f"Conversation {conversation_id} not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    # Check that the conversation belongs to the user
+    if conversation["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
     
-    # Get summary
+    # Get the summary
     summary = await chat_service.summarize_conversation(conversation_id)
     
     return {"summary": summary}
