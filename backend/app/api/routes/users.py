@@ -1,109 +1,83 @@
 """
-User routes for the API.
+User API routes.
 """
-from typing import Any, Dict, List, Optional
+from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from jose import JWTError, jwt
 
-from app.core.config import settings
-from app.core.security import create_access_token
+from app.api.models.base import (
+    User,
+    UserUpdate,
+    ResponseBase,
+)
+from app.api.dependencies.auth import get_current_user
 from app.db.supabase import supabase_client
-from app.core.exceptions import NotFoundError, AuthenticationError, AuthorizationError
-from app.api.routes.auth import oauth2_scheme
+from app.core.exceptions import NotFoundError, ValidationError
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix="/users", tags=["users"])
 
-# Models
-class UserProfile(BaseModel):
-    """User profile model."""
-    id: str
-    email: EmailStr
-    name: str
-    metadata: Dict[str, Any] = {}
-
-class UserUpdate(BaseModel):
-    """User update model."""
-    name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+@router.get("/me", response_model=User)
+async def get_current_user_info(current_user: Annotated[User, Depends(get_current_user)]):
     """
-    Get the current authenticated user.
-    """
-    try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=["HS256"]
-        )
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise AuthenticationError("Could not validate credentials")
-    except JWTError:
-        raise AuthenticationError("Could not validate credentials")
-    
-    user = await supabase_client.get_user(user_id)
-    if user is None:
-        raise NotFoundError("User not found")
-    
-    return user
-
-@router.get("/me", response_model=UserProfile)
-async def get_current_user_profile(
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    """
-    Get current user profile.
+    Get current user information.
     """
     return current_user
 
-@router.patch("/me", response_model=UserProfile)
-async def update_user_profile(
-    user_update: UserUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
+@router.put("/me", response_model=User)
+async def update_current_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+    user_data: UserUpdate
+):
     """
-    Update current user profile.
+    Update current user information.
     """
-    update_data = user_update.dict(exclude_unset=True)
+    # Check if email is changed and if it's already in use
+    if user_data.email and user_data.email != current_user.email:
+        existing_user = await supabase_client.get_user_by_email(user_data.email)
+        if existing_user:
+            raise ValidationError("Email already in use")
     
-    # Don't allow updating the ID
-    if "id" in update_data:
-        del update_data["id"]
+    # Update user data
+    user_dict = user_data.model_dump(exclude_unset=True)
+    if not user_dict:
+        return current_user
     
-    # Merge metadata
-    if "metadata" in update_data and update_data["metadata"]:
-        current_metadata = current_user.get("metadata", {})
-        merged_metadata = {**current_metadata, **update_data["metadata"]}
-        update_data["metadata"] = merged_metadata
-    
-    updated_user = await supabase_client.update_user(
-        current_user["id"], update_data
-    )
-    
+    # Update user in database
+    updated_user = await supabase_client.update_user(current_user.id, user_dict)
     if not updated_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update user profile"
+            detail="Failed to update user"
         )
     
-    return updated_user
+    return User(**updated_user)
 
-@router.get("/{user_id}", response_model=UserProfile)
-async def get_user_profile(
+@router.delete("/me", response_model=ResponseBase)
+async def delete_current_user(current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    Delete current user account.
+    """
+    # Delete user from database
+    success = await supabase_client.delete_user(current_user.id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )
+    
+    return ResponseBase(message="User deleted successfully")
+
+@router.get("/{user_id}", response_model=User)
+async def get_user(
     user_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
+    current_user: Annotated[User, Depends(get_current_user)]
+):
     """
-    Get a specific user profile by ID.
+    Get user by ID.
+    
+    Note: Currently only allows users to fetch their own profile.
     """
-    # Only allow users to view their own profile or admins to view any profile
-    is_admin = current_user.get("metadata", {}).get("is_admin", False)
-    if current_user["id"] != user_id and not is_admin:
-        raise AuthorizationError("Not authorized to access this profile")
+    # Only allow users to fetch their own profile
+    if user_id != current_user.id:
+        raise ValidationError("Not authorized to access this user's data")
     
-    user = await supabase_client.get_user(user_id)
-    if not user:
-        raise NotFoundError("User not found")
-    
-    return user
+    return current_user
