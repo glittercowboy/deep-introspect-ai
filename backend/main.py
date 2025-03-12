@@ -5,8 +5,9 @@ import logging
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import chat, auth, users, insights
+from app.api.routes import chat, auth, users, insights, health
 from app.core.logging import configure_logging
+from app.core.exceptions import setup_exception_handlers
 
 # Configure logging
 configure_logging()
@@ -30,16 +31,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(auth.router, prefix="/api", tags=["Authentication"])
-app.include_router(users.router, prefix="/api", tags=["Users"])
-app.include_router(chat.router, prefix="/api", tags=["Chat"])
-app.include_router(insights.router, prefix="/api", tags=["Insights"])
+# Setup exception handlers
+setup_exception_handlers(app)
 
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+# Include API routes
+app.include_router(auth.router, prefix=f"{settings.API_V1_STR}", tags=["Authentication"])
+app.include_router(users.router, prefix=f"{settings.API_V1_STR}", tags=["Users"])
+app.include_router(chat.router, prefix=f"{settings.API_V1_STR}", tags=["Chat"])
+app.include_router(insights.router, prefix=f"{settings.API_V1_STR}", tags=["Insights"])
+app.include_router(health.router, prefix=f"{settings.API_V1_STR}", tags=["Health"])
 
 @app.on_event("startup")
 async def startup_event():
