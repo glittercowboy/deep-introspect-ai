@@ -71,13 +71,12 @@
 - [ ] Set up user roles and permissions
 
 ### Database
-- [x] Set up Supabase database client
-- [ ] Create database models
+- [x] Set up Supabase client
+- [x] Create Neo4j client 
 - [ ] Implement CRUD operations
 - [ ] Create database migration scripts
 
 ### Neo4j Knowledge Graph
-- [x] Set up Neo4j connection
 - [x] Design knowledge graph schema
 - [x] Implement node and relationship creation
 - [x] Create graph query functions
