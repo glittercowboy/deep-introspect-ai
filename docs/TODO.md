@@ -71,37 +71,45 @@
 - [ ] Set up user roles and permissions
 
 ### Database
-- [ ] Set up Supabase tables
+- [x] Set up Supabase client
+- [x] Set up Neo4j client
 - [ ] Create database models
 - [ ] Implement CRUD operations
 - [ ] Create database migration scripts
 
 ### Neo4j Knowledge Graph
-- [ ] Set up Neo4j connection
-- [ ] Design knowledge graph schema
-- [ ] Implement node and relationship creation
-- [ ] Create graph query functions
-- [ ] Implement knowledge extraction from conversations
+- [x] Set up Neo4j connection
+- [x] Design knowledge graph schema
+- [x] Implement node and relationship creation
+- [x] Create graph query functions
+- [x] Implement knowledge extraction from conversations
 
 ### LLM Integration
-- [ ] Implement OpenAI API client
-- [ ] Implement Anthropic API client
-- [ ] Create model switching functionality
-- [ ] Implement streaming responses
-- [ ] Create prompt engineering templates
+- [x] Implement OpenAI API client
+- [x] Implement Anthropic API client
+- [x] Create model switching functionality
+- [x] Implement streaming responses
+- [x] Create prompt engineering templates
 
 ### Memory System
-- [ ] Integrate with mem0
-- [ ] Implement conversation persistence
-- [ ] Create context retrieval system
-- [ ] Implement RAG with LlamaIndex
-- [ ] Create semantic search functionality
+- [x] Integrate with mem0
+- [x] Implement conversation persistence
+- [x] Create context retrieval system
+- [x] Implement entity extraction system
+- [x] Create semantic search functionality
 
 ### User Insights
-- [ ] Implement insight extraction logic
-- [ ] Create pattern recognition algorithms
-- [ ] Implement periodic insight generation
+- [x] Implement insight extraction logic
+- [x] Create pattern recognition algorithms
+- [x] Implement periodic insight generation
 - [ ] Create notification system for new insights
+
+## API Routes
+- [ ] Implement authentication routes
+- [ ] Implement user profile routes
+- [ ] Implement conversation routes
+- [ ] Implement chat message routes
+- [ ] Implement insights routes
 
 ## Testing
 
