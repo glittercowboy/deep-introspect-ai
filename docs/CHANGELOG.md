@@ -21,10 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configuration and logging modules
 - Created security utilities for JWT authentication
 - Added custom exceptions and exception handlers
-- Implemented Supabase and Neo4j database clients
-- Created LLM services for OpenAI and Anthropic
-- Implemented model switching functionality using factory pattern
-- Built memory service for conversation history and persistence
-- Created knowledge graph service for entity and pattern extraction
-- Added insights service for user understanding and analysis
-- Built chat service to coordinate all backend components
+- Implemented Supabase client for database operations
+- Implemented Neo4j client for knowledge graph operations
+- Created base LLM service and implemented OpenAI and Anthropic providers
+- Added LLM service factory for model switching
+- Implemented memory service for conversation history and context
+- Created knowledge graph service for entity and concept extraction
+- Implemented insights service for generating user insights
+- Added chat service with streaming response support
