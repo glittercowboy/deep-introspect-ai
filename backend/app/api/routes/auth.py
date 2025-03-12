@@ -1,136 +1,269 @@
 """
 Authentication API routes.
 """
+import logging
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import EmailStr
-
 from app.core.config import settings
-from app.core.security import create_access_token, get_password_hash, verify_password
-from app.api.models.base import (
-    UserCreate,
-    User,
-    TokenResponse,
-    ResponseBase,
-)
 from app.db.supabase import supabase_client
-from app.api.dependencies.auth import get_current_user
-from app.core.exceptions import AuthenticationError, ValidationError
+from app.core.security import create_access_token, verify_password, get_password_hash
+from app.api.models.auth import (
+    Token, 
+    LoginRequest, 
+    RefreshTokenRequest, 
+    PasswordResetRequest,
+    PasswordResetConfirmRequest, 
+    RegistrationRequest,
+    RegistrationResponse
+)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
-@router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate):
-    """
-    Register a new user.
-    """
-    # Check if the user already exists
-    existing_user = await supabase_client.get_user_by_email(user_data.email)
-    if existing_user:
-        raise ValidationError("User with this email already exists")
-    
-    # Create a new user with hashed password
-    user_dict = user_data.model_dump()
-    user_dict["password"] = get_password_hash(user_dict["password"])
-    user_dict["id"] = supabase_client.generate_uuid()
-    user_dict["created_at"] = datetime.now().isoformat()
-    user_dict["metadata"] = {}
-    
-    # Store user in database
-    new_user = await supabase_client.create_user(user_dict)
-    if not new_user:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user"
-        )
-    
-    return User(**new_user)
 
-@router.post("/login", response_model=TokenResponse)
-async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+@router.post("/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Any:
     """
-    Login to get an access token.
+    Login with email and password.
+    
+    Args:
+        form_data: OAuth2 form data with username (email) and password
+        
+    Returns:
+        Token object with access token
     """
     # Get user from database
     user = await supabase_client.get_user_by_email(form_data.username)
+    
     if not user:
-        raise AuthenticationError("Incorrect email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     # Verify password
-    if not verify_password(form_data.password, user["password"]):
-        raise AuthenticationError("Incorrect email or password")
+    if not verify_password(form_data.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        subject=user["id"],
-        expires_delta=access_token_expires
+        subject=str(user["id"]), expires_delta=access_token_expires
     )
     
-    return TokenResponse(
+    # Create refresh token (optional)
+    refresh_token = create_access_token(
+        subject=str(user["id"]),
+        expires_delta=timedelta(days=30),
+    )
+    
+    return Token(
         access_token=access_token,
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        token_type="bearer",
+        expires_in=access_token_expires.total_seconds(),
+        refresh_token=refresh_token,
+        user_id=user["id"]
     )
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(current_user: Annotated[User, Depends(get_current_user)]):
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token(refresh_data: RefreshTokenRequest) -> Any:
     """
-    Refresh access token.
-    """
-    # Create new access token
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=current_user.id,
-        expires_delta=access_token_expires
-    )
+    Refresh access token using refresh token.
     
-    return TokenResponse(
-        access_token=access_token,
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    Args:
+        refresh_data: Refresh token data
+        
+    Returns:
+        New token object with access token
+    """
+    try:
+        from jose import jwt
+        
+        # Decode refresh token
+        payload = jwt.decode(
+            refresh_data.refresh_token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
+        
+        # Get user ID from token
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Get user from database
+        user = await supabase_client.get_user(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Create new access token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            subject=str(user["id"]), expires_delta=access_token_expires
+        )
+        
+        # Create new refresh token
+        refresh_token = create_access_token(
+            subject=str(user["id"]),
+            expires_delta=timedelta(days=30),
+        )
+        
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=access_token_expires.total_seconds(),
+            refresh_token=refresh_token,
+            user_id=user["id"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Error refreshing token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@router.post("/register", response_model=RegistrationResponse)
+async def register(registration: RegistrationRequest) -> Any:
+    """
+    Register a new user.
+    
+    Args:
+        registration: Registration data with email and password
+        
+    Returns:
+        Registration response with user ID
+    """
+    # Check if email already exists
+    existing_user = await supabase_client.get_user_by_email(registration.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+    
+    # Create user in database
+    user_data = {
+        "email": registration.email,
+        "password_hash": get_password_hash(registration.password),
+        "name": registration.name,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    
+    user = await supabase_client.create_user(user_data)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user",
+        )
+    
+    return RegistrationResponse(
+        user_id=user["id"],
+        email=user["email"],
+        message="Registration successful",
     )
 
-@router.post("/logout", response_model=ResponseBase)
-async def logout(current_user: Annotated[User, Depends(get_current_user)]):
-    """
-    Logout the current user.
-    
-    Note: JWT tokens cannot be invalidated, so this is primarily
-    for client-side cleanup. The client should discard the token.
-    """
-    return ResponseBase(message="Successfully logged out")
 
-@router.post("/password-reset-request")
-async def request_password_reset(email: EmailStr):
+@router.post("/password-reset", status_code=status.HTTP_202_ACCEPTED)
+async def request_password_reset(reset_request: PasswordResetRequest) -> Any:
     """
     Request a password reset.
+    
+    Args:
+        reset_request: Password reset request with email
+        
+    Returns:
+        Success message
     """
-    # Check if user exists
-    user = await supabase_client.get_user_by_email(email)
+    # Check if email exists
+    user = await supabase_client.get_user_by_email(reset_request.email)
     if not user:
-        # Return success anyway to prevent email enumeration
-        return ResponseBase(message="If the email exists, a password reset link has been sent")
+        # Don't reveal that the email doesn't exist
+        return {"message": "If the email exists, a password reset link will be sent"}
     
-    # In a real implementation, we would send an email with a reset link
-    # For now, we'll just return a success message
+    # Generate reset token
+    reset_token = create_access_token(
+        subject=str(user["id"]),
+        expires_delta=timedelta(hours=24),
+    )
     
-    return ResponseBase(message="If the email exists, a password reset link has been sent")
+    # Store token in database or send via email
+    # In a real implementation, you would send an email with a reset link
+    # For this example, we'll just return the token
+    
+    return {"message": "If the email exists, a password reset link will be sent"}
 
-@router.post("/password-reset")
-async def reset_password(token: str, new_password: str):
-    """
-    Reset password using a reset token.
-    """
-    # In a real implementation, we would validate the token
-    # and update the user's password
-    
-    # For now, we'll just return a success message
-    return ResponseBase(message="Password has been reset successfully")
 
-@router.get("/me", response_model=User)
-async def get_me(current_user: Annotated[User, Depends(get_current_user)]):
+@router.post("/password-reset-confirm", status_code=status.HTTP_200_OK)
+async def confirm_password_reset(reset_confirm: PasswordResetConfirmRequest) -> Any:
     """
-    Get the current authenticated user.
+    Confirm password reset with token and new password.
+    
+    Args:
+        reset_confirm: Password reset confirmation with token and new password
+        
+    Returns:
+        Success message
     """
-    return current_user
+    try:
+        from jose import jwt
+        
+        # Decode reset token
+        payload = jwt.decode(
+            reset_confirm.token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
+        
+        # Get user ID from token
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid reset token",
+            )
+        
+        # Get user from database
+        user = await supabase_client.get_user(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User not found",
+            )
+        
+        # Update password
+        user_data = {
+            "password_hash": get_password_hash(reset_confirm.password),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        updated_user = await supabase_client.update_user(user_id, user_data)
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to reset password",
+            )
+        
+        return {"message": "Password reset successful"}
+        
+    except Exception as e:
+        logger.error(f"Error resetting password: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token",
+        )
