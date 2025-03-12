@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created main chat page with responsive layout
 - Added frontend API client for communicating with backend
 - Implemented streaming message display on frontend
+- Created login and signup pages with form validation
+- Added password reset functionality
+- Implemented authentication provider for managing auth state
+- Created protected route component for authenticated pages
+- Added knowledge graph visualization component
+- Created summary card components for insights visualization
+- Implemented insights page with tabs for different visualizations
 
 ### Core Features Implemented
 - Multi-model LLM support with OpenAI and Anthropic
@@ -59,9 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Responsive chat interface
 - Streaming message responses
 - Model switching (OpenAI/Anthropic)
+- Authentication flow with login/signup
+- Knowledge graph visualization
+- Insights summary cards
 
 ### In Progress
-- Authentication flow implementation
-- Insights visualization
-- User dashboard development
 - Database setup and connection
+- End-to-end testing
+- User dashboard development
