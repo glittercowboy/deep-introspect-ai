@@ -98,3 +98,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### In Progress
 - Database setup and connection
 - End-to-end testing
+
+## [0.2.0] - 2025-03-12
+
+### Added
+- Created comprehensive developer documentation:
+  - Added detailed DEVELOPER.md onboarding guide for new developers
+  - Created ARCHITECTURE.md with system architecture documentation
+  - Added detailed diagrams for system components and data flow
+  - Documented authentication flow and conversation processing
+  - Added insights generation flow documentation
+  - Created detailed knowledge graph architecture documentation
+  - Documented memory system architecture and implementation
+  - Added data model documentation with table schemas
+  - Created troubleshooting section for common issues
+
+### Updated
+- Significantly enhanced README.md with:
+  - Comprehensive setup instructions for all components
+  - Detailed database setup procedures with SQL schemas
+  - Structured project directory overview
+  - Expanded troubleshooting section
+  - Data flow architecture explanations
+  - Updated and expanded development workflow
+  - Enhanced contributing guidelines
+  - Complete reference to all documentation resources
+- Updated TODO.md to reflect completed documentation tasks
+- Improved code organization and structure
+- Enhanced inline code documentation and comments
+
+### Fixed
+- Corrected inconsistencies in installation instructions
+- Fixed directory structure documentation
+- Clarified development workflow procedures
+- Improved readability of architecture documentation
