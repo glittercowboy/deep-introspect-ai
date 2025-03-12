@@ -115,6 +115,7 @@
 - [x] Create Neo4j client
 - [x] Create DB models and schemas
 - [x] Implement CRUD operations
+- [x] Fix Supabase client compatibility with newer versions
 - [ ] Create database migration scripts
 
 ### Neo4j Knowledge Graph
