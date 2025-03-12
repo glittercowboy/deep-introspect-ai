@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoonIcon, SunIcon, Menu, X, User, Settings, LogOut, BarChart, MessageSquare, BrainCircuit } from "lucide-react";
 import { useTheme } from "next-themes";
+import { NotificationCenter } from "@/components/notifications/notification-center";
 
 export default function MainNav({ className }: { className?: string }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -130,6 +131,8 @@ export default function MainNav({ className }: { className?: string }) {
                 <MoonIcon className="h-5 w-5" />
               )}
             </Button>
+            
+            {user && <NotificationCenter />}
             
             {user ? (
               <DropdownMenu>
