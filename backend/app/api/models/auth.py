@@ -1,48 +1,56 @@
 """
-API models for authentication.
+Authentication API models.
 """
 from typing import Optional
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 
 
-class UserCredentials(BaseModel):
-    """Schema for user login credentials."""
-    email: EmailStr = Field(..., description="User's email")
-    password: str = Field(..., description="User's password", min_length=8)
+class Token(BaseModel):
+    """Token model."""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    refresh_token: Optional[str] = None
+    user_id: str
 
 
-class SignUpRequest(UserCredentials):
-    """Schema for user registration."""
-    name: str = Field(..., description="User's full name")
+class TokenPayload(BaseModel):
+    """Token payload model."""
+    sub: str
+    exp: int
 
 
-class TokenResponse(BaseModel):
-    """Schema for token response."""
-    access_token: str = Field(..., description="JWT access token")
-    token_type: str = Field(default="bearer", description="Token type")
-    expires_in: int = Field(..., description="Token expiration time in seconds")
+class LoginRequest(BaseModel):
+    """Login request model."""
+    email: EmailStr
+    password: str
 
 
-class UserResponse(BaseModel):
-    """Schema for user response."""
-    id: str = Field(..., description="User ID")
-    email: EmailStr = Field(..., description="User's email")
-    name: str = Field(..., description="User's full name")
-    created_at: str = Field(..., description="Account creation timestamp")
-
-
-class AuthResponse(BaseModel):
-    """Schema for authentication response."""
-    user: UserResponse = Field(..., description="User data")
-    token: TokenResponse = Field(..., description="Authentication token")
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request model."""
+    refresh_token: str
 
 
 class PasswordResetRequest(BaseModel):
-    """Schema for password reset request."""
-    email: EmailStr = Field(..., description="User's email")
+    """Password reset request model."""
+    email: EmailStr
 
 
-class PasswordResetConfirm(BaseModel):
-    """Schema for password reset confirmation."""
-    token: str = Field(..., description="Password reset token")
-    new_password: str = Field(..., description="New password", min_length=8)
+class PasswordResetConfirmRequest(BaseModel):
+    """Password reset confirmation request model."""
+    token: str
+    password: str
+
+
+class RegistrationRequest(BaseModel):
+    """Registration request model."""
+    email: EmailStr
+    password: str
+    name: Optional[str] = None
+
+
+class RegistrationResponse(BaseModel):
+    """Registration response model."""
+    user_id: str
+    email: EmailStr
+    message: str = "Registration successful"
