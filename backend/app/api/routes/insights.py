@@ -1,161 +1,229 @@
 """
 Insights API routes.
 """
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from app.api.models.user import User
-from app.api.models.insights import InsightListResponse, InsightResponse
+from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
 from app.services.insights.insights_service import insights_service
 from app.services.knowledge.knowledge_service import knowledge_service
-from app.api.dependencies.auth import get_current_user
-from app.db.supabase import supabase_client
+from app.services.chat.chat_service import chat_service
+from app.api.routes.auth import get_current_user
+from app.core.exceptions import NotFoundError
 
-router = APIRouter(prefix="/v1/insights", tags=["Insights"])
+router = APIRouter(prefix="/insights", tags=["Insights"])
 
-@router.get("", response_model=InsightListResponse)
-async def list_insights(
-    current_user: User = Depends(get_current_user),
-    type: Optional[str] = Query(None, description="Filter by insight type"),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-):
+# Models
+class InsightResponse(BaseModel):
+    """Insight response model"""
+    id: str
+    user_id: str
+    conversation_id: str
+    type: str
+    content: str
+    evidence: str
+    created_at: str
+    confidence: float
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class InsightListResponse(BaseModel):
+    """Insight list response model"""
+    insights: List[InsightResponse]
+    total: int
+
+class UserSummaryResponse(BaseModel):
+    """User summary response model"""
+    summary: str
+    categories: Dict[str, Any]
+
+class InsightGraphResponse(BaseModel):
+    """Insight graph response model"""
+    nodes: List[Dict[str, Any]]
+    links: List[Dict[str, Any]]
+
+class UserInsightsResponse(BaseModel):
+    """User insights response model"""
+    insights: List[InsightResponse]
+    summary: UserSummaryResponse
+    graph: InsightGraphResponse
+
+@router.get("/me", response_model=UserInsightsResponse)
+async def get_my_insights(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
-    List insights for the current user.
+    Get current user's insights.
+    
+    Args:
+        current_user: Current user (from token)
+        
+    Returns:
+        User insights, summary, and graph
     """
-    # Get insights from database
-    insights = await insights_service.get_user_insights(current_user.id)
+    insights_data = await chat_service.get_user_insights(current_user["id"])
+    return insights_data
+
+@router.get("/me/list", response_model=InsightListResponse)
+async def list_my_insights(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    List current user's insights.
     
-    # Apply type filter if provided
-    if type:
-        insights = [insight for insight in insights if insight.get("type", "").lower() == type.lower()]
-    
-    # Calculate total
-    total = len(insights)
-    
-    # Apply pagination
-    paginated_insights = insights[offset:offset+limit]
+    Args:
+        current_user: Current user (from token)
+        
+    Returns:
+        List of insights
+    """
+    insights = await insights_service.get_user_insights(current_user["id"])
     
     return {
-        "insights": paginated_insights,
-        "total": total,
-        "limit": limit,
-        "offset": offset
+        "insights": insights,
+        "total": len(insights)
     }
 
-@router.get("/{insight_id}", response_model=InsightResponse)
-async def get_insight(
-    insight_id: str = Path(..., title="The ID of the insight to get"),
-    current_user: User = Depends(get_current_user)
-):
+@router.get("/me/summary", response_model=UserSummaryResponse)
+async def get_my_summary(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
-    Get a specific insight.
+    Get current user's summary.
+    
+    Args:
+        current_user: Current user (from token)
+        
+    Returns:
+        User summary
     """
-    # Find the insight in the user's insights
-    insights = await insights_service.get_user_insights(current_user.id)
-    insight = next((i for i in insights if i["id"] == insight_id), None)
-    
-    if not insight:
-        raise HTTPException(status_code=404, detail="Insight not found")
-    
-    return insight
+    summary = await insights_service.generate_user_summary(current_user["id"])
+    return summary
 
-@router.get("/conversation/{conversation_id}")
-async def get_insights_for_conversation(
-    conversation_id: str = Path(..., title="The ID of the conversation to get insights for"),
-    current_user: User = Depends(get_current_user)
-):
+@router.get("/me/graph", response_model=InsightGraphResponse)
+async def get_my_graph(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Get current user's insight graph.
+    
+    Args:
+        current_user: Current user (from token)
+        
+    Returns:
+        Insight graph
+    """
+    graph = await insights_service.generate_insight_graph(current_user["id"])
+    return graph
+
+@router.get("/me/knowledge", response_model=Dict[str, Any])
+async def get_my_knowledge_graph(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    depth: int = 2
+) -> Dict[str, Any]:
+    """
+    Get current user's knowledge graph.
+    
+    Args:
+        current_user: Current user (from token)
+        depth: Depth of relationships to traverse
+        
+    Returns:
+        Knowledge graph
+    """
+    graph = await knowledge_service.get_user_knowledge_graph(current_user["id"], depth)
+    return graph
+
+@router.get("/conversations/{conversation_id}", response_model=InsightListResponse)
+async def get_conversation_insights(
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get insights for a specific conversation.
+    
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current user (from token)
+        
+    Returns:
+        List of insights
     """
-    # Verify that the conversation exists and belongs to the user
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and belongs to user
     conversation = await supabase_client.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError("Conversation not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to access this conversation"
+        )
     
-    # Get insights for the conversation
-    insights = await insights_service.get_user_insights(current_user.id)
-    conversation_insights = [
-        insight for insight in insights 
-        if insight.get("conversation_id") == conversation_id
-    ]
+    # Get insights for conversation
+    insights = await supabase_client.get_insights_by_conversation(conversation_id)
     
     return {
-        "insights": conversation_insights,
-        "conversation_id": conversation_id
+        "insights": insights,
+        "total": len(insights)
     }
 
-@router.post("/conversation/{conversation_id}/generate")
-async def generate_insights_for_conversation(
-    conversation_id: str = Path(..., title="The ID of the conversation to generate insights for"),
-    current_user: User = Depends(get_current_user)
-):
+@router.post("/conversations/{conversation_id}/generate", response_model=InsightListResponse)
+async def generate_conversation_insights(
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Generate insights for a specific conversation.
+    
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current user (from token)
+        
+    Returns:
+        List of generated insights
     """
-    # Verify that the conversation exists and belongs to the user
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and belongs to user
     conversation = await supabase_client.get_conversation(conversation_id)
     
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise NotFoundError("Conversation not found")
     
-    if conversation["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to access this conversation"
+        )
     
     # Generate insights
     insights = await insights_service.generate_conversation_insights(
-        user_id=current_user.id,
+        user_id=current_user["id"],
         conversation_id=conversation_id
     )
     
     return {
         "insights": insights,
-        "count": len(insights),
-        "conversation_id": conversation_id
+        "total": len(insights)
     }
 
-@router.get("/search")
-async def search_insights(
-    query: str = Query(..., min_length=2, description="Search query"),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Search for insights by content.
-    """
-    # Get all user insights
-    insights = await insights_service.get_user_insights(current_user.id)
-    
-    # Simple search implementation
-    query = query.lower()
-    matching_insights = [
-        insight for insight in insights
-        if query in insight.get("content", "").lower() or query in insight.get("evidence", "").lower()
-    ]
-    
-    return {
-        "insights": matching_insights,
-        "count": len(matching_insights),
-        "query": query
-    }
-
-@router.get("/knowledge/search")
+@router.get("/search", response_model=List[Dict[str, Any]])
 async def search_knowledge(
-    query: str = Query(..., min_length=2, description="Search query"),
-    current_user: User = Depends(get_current_user)
-):
+    query: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> List[Dict[str, Any]]:
     """
     Search the knowledge graph.
-    """
-    results = await knowledge_service.search_knowledge(
-        user_id=current_user.id,
-        query=query
-    )
     
-    return {
-        "results": results,
-        "count": len(results),
-        "query": query
-    }
+    Args:
+        query: Search query
+        current_user: Current user (from token)
+        
+    Returns:
+        List of matching nodes
+    """
+    results = await knowledge_service.search_knowledge(current_user["id"], query)
+    return results
