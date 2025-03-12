@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added chat interface with real-time streaming message display
 - Created insights visualization with list, graph, and summary views
 - Added API route for handling chat messages with streaming support
+- Created notification center component with real-time updates
+- Implemented backend notification service for insight and message alerts
+- Integrated notification center into main navigation
+- Created comprehensive self-reflection techniques guide
+- Added detailed user guide with reflection techniques, conversation tips, and best practices
 
 ### Core Features Implemented
 - Multi-model LLM support with OpenAI and Anthropic
@@ -82,6 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mobile-responsive design
 - Conversation management tools
 - Insights exploration with multiple views
+- Real-time notification system
+- Self-reflection guidance resources
 
 ### In Progress
 - Database setup and connection
