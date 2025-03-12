@@ -23,11 +23,12 @@
 - [x] Set up dark mode theme provider
 
 ### Authentication
-- [ ] Implement Supabase auth integration
-- [ ] Create sign up page
-- [ ] Create login page
-- [ ] Create password reset functionality
-- [ ] Implement protected routes
+- [x] Create login page
+- [x] Create signup page
+- [x] Create password reset functionality
+- [x] Implement authentication provider
+- [x] Implement protected routes
+- [ ] Test authentication flow with Supabase
 
 ### Chat Interface
 - [x] Create chat UI components
@@ -49,9 +50,10 @@
 - [ ] Create profile visualization
 
 ### Insights Page
-- [ ] Design insights visualization components
-- [ ] Implement knowledge graph visualization
-- [ ] Create insights categories list
+- [x] Design insights visualization components
+- [x] Create knowledge graph visualization
+- [x] Create insights summary cards
+- [x] Implement basic insights page
 - [ ] Implement insights filtering
 - [ ] Create insights export functionality
 
