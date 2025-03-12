@@ -71,8 +71,7 @@
 - [ ] Set up user roles and permissions
 
 ### Database
-- [x] Create Supabase client
-- [ ] Set up Supabase tables
+- [x] Set up Supabase database client
 - [ ] Create database models
 - [ ] Implement CRUD operations
 - [ ] Create database migration scripts
