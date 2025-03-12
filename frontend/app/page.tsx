@@ -19,7 +19,7 @@ export default function Home() {
       
       <div className="container max-w-6xl relative z-10">
         <div className="flex flex-col items-center text-center space-y-6">
-          <h1 className="text-5xl md:text-7xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 animate-text">
+          <h1 className="text-5xl md:text-7xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500">
             DeepIntrospect AI
           </h1>
           
@@ -35,8 +35,8 @@ export default function Home() {
             </Button>
             
             <Button asChild size="lg" variant="outline" className="border-gray-500 hover:bg-gray-800">
-              <Link href="/about">
-                Learn More
+              <Link href="/insights">
+                View Insights
               </Link>
             </Button>
           </div>
