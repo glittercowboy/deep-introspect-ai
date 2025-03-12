@@ -1,3 +1,1 @@
-"""
-API models for request and response schemas.
-"""
+# API models package initialization
