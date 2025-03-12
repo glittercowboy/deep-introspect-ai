@@ -1,229 +1,207 @@
 """
 Insights API routes.
 """
-from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from typing import Dict, List, Optional, Any
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-
-from app.services.insights.insights_service import insights_service
-from app.services.knowledge.knowledge_service import knowledge_service
 from app.services.chat.chat_service import chat_service
-from app.api.routes.auth import get_current_user
+from app.services.insights.insights_service import insights_service
 from app.core.exceptions import NotFoundError
 
-router = APIRouter(prefix="/insights", tags=["Insights"])
+logger = logging.getLogger(__name__)
 
-# Models
+router = APIRouter(prefix="/v1/insights", tags=["insights"])
+
+
 class InsightResponse(BaseModel):
-    """Insight response model"""
-    id: str
-    user_id: str
-    conversation_id: str
-    type: str
-    content: str
-    evidence: str
-    created_at: str
-    confidence: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    """Insight response model."""
+    id: str = Field(..., description="Insight ID")
+    user_id: str = Field(..., description="User ID")
+    conversation_id: str = Field(..., description="Conversation ID")
+    type: str = Field(..., description="Insight type (belief, value, pattern, etc.)")
+    content: str = Field(..., description="Insight content")
+    evidence: str = Field(..., description="Evidence from conversation")
+    created_at: str = Field(..., description="Creation timestamp")
+    confidence: float = Field(..., description="Confidence score (0-1)")
+    
+    class Config:
+        """Pydantic config."""
+        schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "user_id": "123e4567-e89b-12d3-a456-426614174002",
+                "conversation_id": "123e4567-e89b-12d3-a456-426614174001",
+                "type": "belief",
+                "content": "The user believes they are not qualified for senior roles.",
+                "evidence": "I don't think I have what it takes to be a senior developer yet.",
+                "created_at": "2025-01-01T00:00:00Z",
+                "confidence": 0.8
+            }
+        }
 
-class InsightListResponse(BaseModel):
-    """Insight list response model"""
-    insights: List[InsightResponse]
-    total: int
 
-class UserSummaryResponse(BaseModel):
-    """User summary response model"""
-    summary: str
-    categories: Dict[str, Any]
+class SummaryResponse(BaseModel):
+    """User summary response model."""
+    summary: str = Field(..., description="Overall summary")
+    categories: Dict[str, Any] = Field(..., description="Categorized summaries")
+    
+    class Config:
+        """Pydantic config."""
+        schema_extra = {
+            "example": {
+                "summary": "Jane is a reflective software developer focused on growth.",
+                "categories": {
+                    "key_traits": ["Analytical", "Growth-oriented"],
+                    "values_beliefs": ["Values work-life balance", "Believes in continuous learning"],
+                    "goals": ["Become a senior developer", "Improve communication skills"],
+                    "challenges": ["Imposter syndrome", "Work-related anxiety"],
+                    "patterns": ["Self-critical thinking", "Seeks validation from others"]
+                }
+            }
+        }
 
-class InsightGraphResponse(BaseModel):
-    """Insight graph response model"""
-    nodes: List[Dict[str, Any]]
-    links: List[Dict[str, Any]]
+
+class GraphResponse(BaseModel):
+    """Graph visualization response model."""
+    nodes: List[Dict[str, Any]] = Field(..., description="Graph nodes")
+    links: List[Dict[str, Any]] = Field(..., description="Graph links")
+    
+    class Config:
+        """Pydantic config."""
+        schema_extra = {
+            "example": {
+                "nodes": [
+                    {"id": "user-123", "label": "User", "type": "user", "size": 20},
+                    {"id": "insight-1", "label": "Values work-life balance", "type": "value", "size": 10}
+                ],
+                "links": [
+                    {"source": "user-123", "target": "insight-1", "label": "has_value", "type": "value"}
+                ]
+            }
+        }
+
 
 class UserInsightsResponse(BaseModel):
-    """User insights response model"""
-    insights: List[InsightResponse]
-    summary: UserSummaryResponse
-    graph: InsightGraphResponse
+    """User insights response model."""
+    insights: List[InsightResponse] = Field(..., description="List of insights")
+    summary: SummaryResponse = Field(..., description="User summary")
+    graph: GraphResponse = Field(..., description="Graph visualization data")
 
-@router.get("/me", response_model=UserInsightsResponse)
-async def get_my_insights(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+@router.get("/user", response_model=UserInsightsResponse)
+async def get_user_insights(
+    user_id: str = "test-user"  # TODO: Get from auth
 ) -> Dict[str, Any]:
     """
-    Get current user's insights.
-    
-    Args:
-        current_user: Current user (from token)
-        
-    Returns:
-        User insights, summary, and graph
+    Get all insights for a user.
     """
-    insights_data = await chat_service.get_user_insights(current_user["id"])
-    return insights_data
+    try:
+        insights_data = await chat_service.get_user_insights(user_id)
+        return insights_data
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting user insights: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get user insights"
+        )
 
-@router.get("/me/list", response_model=InsightListResponse)
-async def list_my_insights(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+@router.get("/user/summary", response_model=SummaryResponse)
+async def get_user_summary(
+    user_id: str = "test-user"  # TODO: Get from auth
 ) -> Dict[str, Any]:
     """
-    List current user's insights.
-    
-    Args:
-        current_user: Current user (from token)
-        
-    Returns:
-        List of insights
+    Get a summary of a user.
     """
-    insights = await insights_service.get_user_insights(current_user["id"])
-    
-    return {
-        "insights": insights,
-        "total": len(insights)
-    }
+    try:
+        summary = await insights_service.generate_user_summary(user_id)
+        return summary
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting user summary: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get user summary"
+        )
 
-@router.get("/me/summary", response_model=UserSummaryResponse)
-async def get_my_summary(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+@router.get("/user/graph", response_model=GraphResponse)
+async def get_user_graph(
+    user_id: str = "test-user"  # TODO: Get from auth
 ) -> Dict[str, Any]:
     """
-    Get current user's summary.
-    
-    Args:
-        current_user: Current user (from token)
-        
-    Returns:
-        User summary
+    Get a graph visualization of a user's insights.
     """
-    summary = await insights_service.generate_user_summary(current_user["id"])
-    return summary
+    try:
+        graph = await insights_service.generate_insight_graph(user_id)
+        return graph
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting user graph: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get user graph"
+        )
 
-@router.get("/me/graph", response_model=InsightGraphResponse)
-async def get_my_graph(
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Dict[str, Any]:
-    """
-    Get current user's insight graph.
-    
-    Args:
-        current_user: Current user (from token)
-        
-    Returns:
-        Insight graph
-    """
-    graph = await insights_service.generate_insight_graph(current_user["id"])
-    return graph
 
-@router.get("/me/knowledge", response_model=Dict[str, Any])
-async def get_my_knowledge_graph(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    depth: int = 2
-) -> Dict[str, Any]:
-    """
-    Get current user's knowledge graph.
-    
-    Args:
-        current_user: Current user (from token)
-        depth: Depth of relationships to traverse
-        
-    Returns:
-        Knowledge graph
-    """
-    graph = await knowledge_service.get_user_knowledge_graph(current_user["id"], depth)
-    return graph
-
-@router.get("/conversations/{conversation_id}", response_model=InsightListResponse)
+@router.get("/conversations/{conversation_id}", response_model=List[InsightResponse])
 async def get_conversation_insights(
     conversation_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Dict[str, Any]:
-    """
-    Get insights for a specific conversation.
-    
-    Args:
-        conversation_id: Conversation ID
-        current_user: Current user (from token)
-        
-    Returns:
-        List of insights
-    """
-    from app.db.supabase import supabase_client
-    
-    # Verify conversation exists and belongs to user
-    conversation = await supabase_client.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    if conversation["user_id"] != current_user["id"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to access this conversation"
-        )
-    
-    # Get insights for conversation
-    insights = await supabase_client.get_insights_by_conversation(conversation_id)
-    
-    return {
-        "insights": insights,
-        "total": len(insights)
-    }
-
-@router.post("/conversations/{conversation_id}/generate", response_model=InsightListResponse)
-async def generate_conversation_insights(
-    conversation_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Dict[str, Any]:
-    """
-    Generate insights for a specific conversation.
-    
-    Args:
-        conversation_id: Conversation ID
-        current_user: Current user (from token)
-        
-    Returns:
-        List of generated insights
-    """
-    from app.db.supabase import supabase_client
-    
-    # Verify conversation exists and belongs to user
-    conversation = await supabase_client.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    if conversation["user_id"] != current_user["id"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to access this conversation"
-        )
-    
-    # Generate insights
-    insights = await insights_service.generate_conversation_insights(
-        user_id=current_user["id"],
-        conversation_id=conversation_id
-    )
-    
-    return {
-        "insights": insights,
-        "total": len(insights)
-    }
-
-@router.get("/search", response_model=List[Dict[str, Any]])
-async def search_knowledge(
-    query: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    user_id: str = "test-user"  # TODO: Get from auth
 ) -> List[Dict[str, Any]]:
     """
-    Search the knowledge graph.
-    
-    Args:
-        query: Search query
-        current_user: Current user (from token)
-        
-    Returns:
-        List of matching nodes
+    Get insights for a specific conversation.
     """
-    results = await knowledge_service.search_knowledge(current_user["id"], query)
-    return results
+    try:
+        from app.db.supabase import supabase_client
+        insights = await supabase_client.get_insights_by_conversation(conversation_id)
+        return insights
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting conversation insights: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get conversation insights"
+        )
+
+
+@router.post("/conversations/{conversation_id}/generate", response_model=List[InsightResponse])
+async def generate_conversation_insights(
+    conversation_id: str,
+    user_id: str = "test-user"  # TODO: Get from auth
+) -> List[Dict[str, Any]]:
+    """
+    Generate insights for a conversation.
+    """
+    try:
+        insights = await insights_service.generate_conversation_insights(user_id, conversation_id)
+        return insights
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error generating conversation insights: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate conversation insights"
+        )
