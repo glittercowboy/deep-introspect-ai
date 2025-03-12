@@ -1,170 +1,299 @@
 """
-Insights routes for the API.
+Insights API routes.
 """
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-import uuid
-from datetime import datetime
-
+from app.api.dependencies.auth import get_current_user
+from app.api.models.insights import (
+    InsightResponse,
+    UserInsightsResponse,
+    InsightCategoryResponse,
+    InsightAnalysisResponse,
+    ConversationInsightsRequest,
+    ConversationInsightsResponse,
+    KnowledgeGraphResponse,
+    UserSummaryResponse
+)
 from app.services.insights.insights_service import insights_service
 from app.services.knowledge.knowledge_service import knowledge_service
 from app.services.chat.chat_service import chat_service
-from app.core.exceptions import NotFoundError, AuthorizationError
-from app.api.routes.users import get_current_user
 
 router = APIRouter(prefix="/insights", tags=["Insights"])
+logger = logging.getLogger(__name__)
 
-# Models
-class InsightResponse(BaseModel):
-    """Insight response model."""
-    id: str
-    user_id: str
-    conversation_id: Optional[str] = None
-    type: str
-    content: str
-    evidence: str
-    created_at: str
-    confidence: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
-class UserSummaryResponse(BaseModel):
-    """User summary response model."""
-    summary: str
-    categories: Dict[str, Any] = Field(default_factory=dict)
-
-class GraphData(BaseModel):
-    """Graph data model."""
-    nodes: List[Dict[str, Any]] = Field(default_factory=list)
-    links: List[Dict[str, Any]] = Field(default_factory=list)
-
-class UserInsightsResponse(BaseModel):
-    """User insights response model."""
-    insights: List[InsightResponse] = Field(default_factory=list)
-    summary: UserSummaryResponse
-    graph: GraphData
-
-@router.get("", response_model=List[InsightResponse])
-async def list_insights(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+@router.get("/", response_model=List[InsightResponse])
+async def get_user_insights(
+    current_user: dict = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+    category: str = None
 ) -> Any:
     """
-    List all insights for the current user.
-    """
-    from app.db.supabase import supabase_client
+    Get insights for the current user.
     
-    insights = await supabase_client.get_insights(current_user["id"])
-    return insights
+    Args:
+        current_user: Current authenticated user
+        limit: Maximum number of insights to return
+        offset: Offset for pagination
+        category: Filter by insight category
+        
+    Returns:
+        List of insights
+    """
+    # Get insights
+    insights = await insights_service.get_user_insights(current_user["id"])
+    
+    # Filter by category if specified
+    if category:
+        insights = [i for i in insights if i.get("type", "").lower() == category.lower()]
+    
+    # Apply pagination
+    paginated_insights = insights[offset:offset + limit]
+    
+    return paginated_insights
+
 
 @router.get("/summary", response_model=UserSummaryResponse)
 async def get_user_summary(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
-    Get a summary of user insights.
+    Get a summary of the user based on their insights.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        User summary
     """
-    # Generate user summary
     summary = await insights_service.generate_user_summary(current_user["id"])
     return summary
 
-@router.get("/graph", response_model=GraphData)
-async def get_insights_graph(
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    """
-    Get a graph visualization of user insights.
-    """
-    # Generate graph data
-    graph = await insights_service.generate_insight_graph(current_user["id"])
-    return graph
 
-@router.get("/knowledge", response_model=Dict[str, Any])
+@router.get("/graph", response_model=KnowledgeGraphResponse)
 async def get_knowledge_graph(
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     depth: int = 2
 ) -> Any:
     """
-    Get the user's knowledge graph.
+    Get the knowledge graph for the user.
+    
+    Args:
+        current_user: Current authenticated user
+        depth: Graph traversal depth
+        
+    Returns:
+        Knowledge graph with nodes and links
     """
-    # Get knowledge graph data
-    graph = await knowledge_service.get_user_knowledge_graph(
-        user_id=current_user["id"],
-        depth=depth
-    )
+    graph = await insights_service.generate_insight_graph(current_user["id"])
     return graph
 
-@router.get("/search", response_model=List[Dict[str, Any]])
-async def search_knowledge(
-    query: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+@router.get("/categories", response_model=List[InsightCategoryResponse])
+async def get_insight_categories(
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
-    Search the knowledge graph.
+    Get insights grouped by category.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        Insights grouped by category
     """
-    # Search knowledge graph
-    results = await knowledge_service.search_knowledge(
-        user_id=current_user["id"],
-        query=query
+    # Get all insights
+    insights = await insights_service.get_user_insights(current_user["id"])
+    
+    # Group by category
+    categories = {}
+    for insight in insights:
+        category = insight.get("type", "unknown").lower()
+        if category not in categories:
+            categories[category] = {
+                "category": category,
+                "count": 0,
+                "insights": []
+            }
+        
+        categories[category]["count"] += 1
+        categories[category]["insights"].append(insight)
+    
+    # Convert to list
+    category_list = list(categories.values())
+    
+    # Sort by count (most common first)
+    category_list.sort(key=lambda x: x["count"], reverse=True)
+    
+    return category_list
+
+
+@router.get("/analysis", response_model=InsightAnalysisResponse)
+async def get_insight_analysis(
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Get analysis of user insights with trends and patterns.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        Insight analysis with trends and patterns
+    """
+    # Get all insights
+    insights = await insights_service.get_user_insights(current_user["id"])
+    
+    # Count by category
+    categories = {}
+    for insight in insights:
+        category = insight.get("type", "unknown").lower()
+        if category not in categories:
+            categories[category] = 0
+        
+        categories[category] += 1
+    
+    # Get recent insights (top 10)
+    recent_insights = sorted(
+        insights, 
+        key=lambda x: x.get("created_at", ""), 
+        reverse=True
+    )[:10]
+    
+    # Get top patterns (if any)
+    patterns = [i for i in insights if i.get("type", "").lower() == "pattern"]
+    patterns.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    top_patterns = patterns[:5]
+    
+    # Generate trend analysis
+    # In a real implementation, this would be more sophisticated
+    trend_analysis = {
+        "most_common_category": max(categories.items(), key=lambda x: x[1])[0] if categories else None,
+        "insight_count_over_time": {
+            "last_week": len([i for i in insights if is_within_last_days(i.get("created_at", ""), 7)]),
+            "last_month": len([i for i in insights if is_within_last_days(i.get("created_at", ""), 30)]),
+            "total": len(insights)
+        },
+        "category_distribution": categories
+    }
+    
+    return InsightAnalysisResponse(
+        total_count=len(insights),
+        categories=categories,
+        recent_insights=recent_insights,
+        top_patterns=top_patterns,
+        trend_analysis=trend_analysis
     )
-    return results
 
-@router.get("/conversation/{conversation_id}", response_model=List[InsightResponse])
-async def get_conversation_insights(
-    conversation_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    """
-    Get insights for a specific conversation.
-    """
-    from app.db.supabase import supabase_client
-    
-    # Verify conversation exists and user has access
-    conversation = await supabase_client.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    if conversation["user_id"] != current_user["id"]:
-        raise AuthorizationError("Not authorized to access this conversation")
-    
-    # Get insights for the conversation
-    insights = await supabase_client.get_insights_by_conversation(conversation_id)
-    return insights
 
-@router.post("/conversation/{conversation_id}", response_model=List[InsightResponse])
+@router.post("/conversations", response_model=ConversationInsightsResponse)
 async def generate_conversation_insights(
-    conversation_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    request: ConversationInsightsRequest,
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
-    Generate new insights for a conversation.
+    Generate insights from a conversation.
+    
+    Args:
+        request: Request with conversation ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Generated insights
     """
-    from app.db.supabase import supabase_client
-    
-    # Verify conversation exists and user has access
-    conversation = await supabase_client.get_conversation(conversation_id)
-    
+    # Get conversation to verify ownership
+    conversation = await chat_service.get_conversation(request.conversation_id)
     if not conversation:
-        raise NotFoundError("Conversation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
     
+    # Check if user owns the conversation
     if conversation["user_id"] != current_user["id"]:
-        raise AuthorizationError("Not authorized to access this conversation")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
     
     # Generate insights
     insights = await insights_service.generate_conversation_insights(
-        user_id=current_user["id"],
-        conversation_id=conversation_id
+        current_user["id"],
+        request.conversation_id
     )
     
-    return insights
+    # Simple analysis
+    analysis = {
+        "total_count": len(insights),
+        "categories": {}
+    }
+    
+    # Count by category
+    for insight in insights:
+        category = insight.get("type", "unknown").lower()
+        if category not in analysis["categories"]:
+            analysis["categories"][category] = 0
+        
+        analysis["categories"][category] += 1
+    
+    return ConversationInsightsResponse(
+        insights=insights,
+        conversation_id=request.conversation_id,
+        analysis=analysis
+    )
 
-@router.get("/all", response_model=UserInsightsResponse)
-async def get_all_user_insights(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+@router.get("/search", response_model=List[InsightResponse])
+async def search_insights(
+    query: str,
+    current_user: dict = Depends(get_current_user)
 ) -> Any:
     """
-    Get all insights, summary, and graph for the user.
+    Search for insights.
+    
+    Args:
+        query: Search query
+        current_user: Current authenticated user
+        
+    Returns:
+        List of matching insights
     """
-    # Get complete user insights
-    user_insights = await chat_service.get_user_insights(current_user["id"])
-    return user_insights
+    # In a real implementation, you would use a proper search index
+    # For this example, we'll do a simple string search
+    insights = await insights_service.get_user_insights(current_user["id"])
+    
+    # Filter insights that match the query
+    matching_insights = []
+    for insight in insights:
+        content = insight.get("content", "").lower()
+        evidence = insight.get("evidence", "").lower()
+        category = insight.get("type", "").lower()
+        
+        if (query.lower() in content or 
+            query.lower() in evidence or 
+            query.lower() in category):
+            matching_insights.append(insight)
+    
+    return matching_insights
+
+
+def is_within_last_days(date_str: str, days: int) -> bool:
+    """
+    Check if a date string is within the last N days.
+    
+    Args:
+        date_str: ISO format date string
+        days: Number of days
+        
+    Returns:
+        True if the date is within the last N days
+    """
+    from datetime import datetime, timedelta
+    try:
+        date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        now = datetime.now()
+        return (now - date) <= timedelta(days=days)
+    except Exception:
+        return False
