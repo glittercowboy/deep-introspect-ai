@@ -23,11 +23,31 @@ class SupabaseClient:
     
     def _initialize(self):
         """Initialize the Supabase client."""
-        self.client: Client = create_client(
-            settings.SUPABASE_URL, 
-            settings.SUPABASE_SERVICE_KEY
-        )
-        logger.info("Supabase client initialized")
+        try:
+            # Try to create the client with just the required parameters
+            # This should work with both newer and older versions of the library
+            self.client = create_client(
+                settings.SUPABASE_URL, 
+                settings.SUPABASE_SERVICE_KEY
+            )
+            logger.info("Supabase client initialized successfully")
+        except TypeError as e:
+            # Log the exact error for debugging
+            logger.error(f"Error initializing Supabase client: {str(e)}")
+            
+            # Attempt fallback initialization for newer versions
+            # Import the necessary components directly to avoid version-specific issues
+            try:
+                from supabase.client import Client as SupabaseDirectClient
+                logger.info("Attempting fallback initialization with direct Client import")
+                self.client = SupabaseDirectClient(
+                    supabase_url=settings.SUPABASE_URL,
+                    supabase_key=settings.SUPABASE_SERVICE_KEY
+                )
+                logger.info("Supabase client initialized with fallback method")
+            except Exception as fallback_error:
+                logger.error(f"Fallback initialization failed: {str(fallback_error)}")
+                raise
     
     async def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
