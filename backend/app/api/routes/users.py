@@ -1,154 +1,103 @@
 """
 User API routes.
 """
+from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+
 from app.db.supabase import supabase_client
 from app.api.routes.auth import get_current_user
 from app.core.exceptions import NotFoundError
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
-# Models for request and response
-class UserProfile(BaseModel):
-    """User profile model."""
+# Models
+class UserUpdateRequest(BaseModel):
+    """User update request model"""
+    name: str = None
+    metadata: Dict[str, Any] = None
+
+class UserResponse(BaseModel):
+    """User response model"""
     id: str
     email: str
-    full_name: Optional[str] = None
-    created_at: datetime
-    preferences: Dict[str, Any] = {}
+    name: str
+    created_at: str
+    last_sign_in_at: str = None
+    metadata: Dict[str, Any] = None
 
-class UserProfileUpdate(BaseModel):
-    """User profile update model."""
-    full_name: Optional[str] = None
-    preferences: Optional[Dict[str, Any]] = None
-
-class UserStats(BaseModel):
-    """User statistics model."""
-    conversation_count: int
-    message_count: int
-    insight_count: int
-    last_activity: Optional[datetime] = None
-    total_tokens_used: int = 0
-
-@router.get("/me", response_model=UserProfile)
-async def get_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
-    Get the current user's profile.
+    Get current user profile.
     
     Args:
-        current_user: Current user data
+        current_user: Current user (from token)
         
     Returns:
         User profile
     """
-    # We already have most of the user data from the dependency
-    # Just format it to match the response model
-    profile = {
-        "id": current_user["id"],
-        "email": current_user["email"],
-        "full_name": current_user.get("full_name"),
-        "created_at": datetime.fromisoformat(current_user["created_at"]),
-        "preferences": current_user.get("preferences", {})
-    }
-    
-    return profile
+    return current_user
 
-@router.patch("/me", response_model=UserProfile)
-async def update_profile(
-    profile_update: UserProfileUpdate,
+@router.put("/me", response_model=UserResponse)
+async def update_me(
+    request: UserUpdateRequest,
     current_user: Dict[str, Any] = Depends(get_current_user)
-):
+) -> Dict[str, Any]:
     """
-    Update the current user's profile.
+    Update current user profile.
     
     Args:
-        profile_update: Profile data to update
-        current_user: Current user data
+        request: User update request
+        current_user: Current user (from token)
         
     Returns:
         Updated user profile
     """
-    # Build update data
     update_data = {}
     
-    if profile_update.full_name is not None:
-        update_data["full_name"] = profile_update.full_name
-        
-    if profile_update.preferences is not None:
-        # Merge with existing preferences
-        existing_prefs = current_user.get("preferences", {})
-        update_data["preferences"] = {**existing_prefs, **profile_update.preferences}
+    if request.name is not None:
+        update_data["name"] = request.name
+    
+    if request.metadata is not None:
+        update_data["metadata"] = request.metadata
     
     if not update_data:
-        # No changes requested
-        return await get_profile(current_user)
+        return current_user
     
-    # Update the user in the database
+    # Update user in database
     updated_user = await supabase_client.update_user(current_user["id"], update_data)
     
     if not updated_user:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update profile"
-        )
+        raise NotFoundError("User not found")
     
-    # Return the updated profile
-    return {
-        "id": updated_user["id"],
-        "email": updated_user["email"],
-        "full_name": updated_user.get("full_name"),
-        "created_at": datetime.fromisoformat(updated_user["created_at"]),
-        "preferences": updated_user.get("preferences", {})
-    }
+    return updated_user
 
-@router.get("/me/stats", response_model=UserStats)
-async def get_user_stats(current_user: Dict[str, Any] = Depends(get_current_user)):
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
-    Get the current user's statistics.
+    Get user by ID.
     
     Args:
-        current_user: Current user data
+        user_id: User ID
+        current_user: Current user (from token)
         
     Returns:
-        User statistics
+        User profile
     """
-    user_id = current_user["id"]
-    
-    # Get conversations
-    conversations = await supabase_client.get_conversations(user_id)
-    conversation_count = len(conversations)
-    
-    # Get message count (across all conversations)
-    message_count = 0
-    for conversation in conversations:
-        messages = await supabase_client.get_messages(conversation["id"])
-        message_count += len(messages)
-    
-    # Get insights
-    insights = await supabase_client.get_insights(user_id)
-    insight_count = len(insights)
-    
-    # Determine last activity
-    last_activity = None
-    if conversations:
-        # Sort conversations by updated_at
-        sorted_conversations = sorted(
-            conversations,
-            key=lambda c: c.get("updated_at", c.get("created_at")),
-            reverse=True
+    # Only allow getting own user for now (can be expanded with admin permissions)
+    if user_id != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to access other users"
         )
-        last_activity_str = sorted_conversations[0].get("updated_at", sorted_conversations[0].get("created_at"))
-        if last_activity_str:
-            last_activity = datetime.fromisoformat(last_activity_str)
     
-    # Return stats
-    return {
-        "conversation_count": conversation_count,
-        "message_count": message_count,
-        "insight_count": insight_count,
-        "last_activity": last_activity,
-        "total_tokens_used": current_user.get("total_tokens_used", 0)
-    }
+    user = await supabase_client.get_user(user_id)
+    
+    if not user:
+        raise NotFoundError("User not found")
+    
+    return user
