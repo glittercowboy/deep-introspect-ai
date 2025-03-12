@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integrated notification center into main navigation
 - Created comprehensive self-reflection techniques guide
 - Added detailed user guide with reflection techniques, conversation tips, and best practices
+- Set up Jest and React Testing Library for frontend testing
+- Created sample component tests and test utilities
+- Set up pytest for backend testing with fixtures and configuration
+- Added backend unit tests for services and API endpoints
 
 ### Core Features Implemented
 - Multi-model LLM support with OpenAI and Anthropic
@@ -89,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Insights exploration with multiple views
 - Real-time notification system
 - Self-reflection guidance resources
+- Testing infrastructure for both frontend and backend
 
 ### In Progress
 - Database setup and connection
