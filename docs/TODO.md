@@ -157,16 +157,18 @@
 ## Testing
 
 ### Frontend
-- [ ] Set up Jest for unit testing
-- [ ] Set up React Testing Library
-- [ ] Create component tests
+- [x] Set up Jest for unit testing
+- [x] Set up React Testing Library
+- [x] Create sample component tests
+- [x] Set up testing utilities and mocks
 - [ ] Create integration tests
 - [ ] Set up end-to-end tests with Cypress
 
 ### Backend
-- [ ] Set up pytest
-- [ ] Create API tests
-- [ ] Create service unit tests
+- [x] Set up pytest
+- [x] Create test fixtures and utilities
+- [x] Create sample API tests
+- [x] Create sample service unit tests
 - [ ] Create database test fixtures
 - [ ] Set up CI pipeline
 
