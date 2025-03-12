@@ -49,6 +49,26 @@ class SupabaseClient:
             logger.error(f"Error getting user {user_id}: {str(e)}")
             return None
     
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user by email.
+        
+        Args:
+            email: The user email
+            
+        Returns:
+            User data or None if not found
+        """
+        try:
+            response = self.client.table("users").select("*").eq("email", email).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user by email {email}: {str(e)}")
+            return None
+    
     async def create_user(self, user_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Create a new user.
@@ -146,6 +166,27 @@ class SupabaseClient:
             return None
         except Exception as e:
             logger.error(f"Error creating conversation: {str(e)}")
+            return None
+    
+    async def update_conversation(self, conversation_id: str, conversation_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Update conversation data.
+        
+        Args:
+            conversation_id: The conversation ID
+            conversation_data: Conversation data to update
+            
+        Returns:
+            Updated conversation data or None if failed
+        """
+        try:
+            response = self.client.table("conversations").update(conversation_data).eq("id", conversation_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error updating conversation {conversation_id}: {str(e)}")
             return None
     
     async def get_messages(self, conversation_id: str) -> List[Dict[str, Any]]:
