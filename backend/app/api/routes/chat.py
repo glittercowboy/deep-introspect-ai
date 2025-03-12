@@ -1,249 +1,319 @@
 """
 Chat API routes.
 """
-from typing import Annotated, List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+import logging
+from typing import Any, List
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from app.api.dependencies.auth import get_current_user
+from app.api.models.chat import (
+    ConversationResponse,
+    ConversationDetailResponse,
+    MessageResponse,
+    SendMessageRequest,
+    SendMessageResponse,
+    StartConversationRequest,
+    StartConversationResponse
+)
+from app.services.chat.chat_service import chat_service
 from fastapi.responses import StreamingResponse
 
-from app.api.models.base import (
-    User,
-    Conversation,
-    ConversationCreate,
-    ConversationSummary,
-    MessageCreate,
-    Message,
-    ResponseBase,
-    IDResponse,
-)
-from app.api.dependencies.auth import get_current_user
-from app.services.chat.chat_service import chat_service
-from app.services.memory.memory_service import memory_service
-from app.core.exceptions import NotFoundError, ValidationError
+router = APIRouter(prefix="/chat", tags=["Chat"])
+logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/chat", tags=["chat"])
 
-@router.post("/conversations", response_model=Conversation, status_code=status.HTTP_201_CREATED)
-async def create_conversation(
-    conversation_data: ConversationCreate,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
-    """
-    Create a new conversation.
-    """
-    new_conversation = await chat_service.start_conversation(
-        user_id=current_user.id,
-        title=conversation_data.title
-    )
-    
-    if not new_conversation:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create conversation"
-        )
-    
-    return Conversation(**new_conversation)
-
-@router.get("/conversations", response_model=List[ConversationSummary])
+@router.get("/conversations", response_model=List[ConversationResponse])
 async def get_conversations(
-    current_user: Annotated[User, Depends(get_current_user)],
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100)
-):
+    current_user: dict = Depends(get_current_user)
+) -> Any:
     """
     Get all conversations for the current user.
-    """
-    conversations = await memory_service.get_user_conversations(current_user.id)
     
-    # Convert to ConversationSummary objects
-    result = []
-    for conv in conversations:
-        # Get message count
-        messages = await memory_service.get_conversation_history(conv["id"])
+    Args:
+        current_user: Current authenticated user
         
-        # Generate summary if not already available
-        summary = ""
-        if "summary" in conv["metadata"] and conv["metadata"]["summary"]:
-            summary = conv["metadata"]["summary"]
-        else:
-            # Only generate for conversations with enough messages
-            if len(messages) >= 3:
-                summary = await chat_service.summarize_conversation(conv["id"])
+    Returns:
+        List of conversations
+    """
+    conversations = await chat_service.get_user_conversations(current_user["id"])
+    return conversations
+
+
+@router.post("/conversations", response_model=StartConversationResponse)
+async def start_conversation(
+    request: StartConversationRequest,
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Start a new conversation.
+    
+    Args:
+        request: Start conversation request with title and model
+        current_user: Current authenticated user
         
-        result.append(
-            ConversationSummary(
-                id=conv["id"],
-                title=conv["title"],
-                summary=summary,
-                message_count=len(messages),
-                created_at=conv["created_at"],
-                updated_at=conv["updated_at"]
-            )
-        )
-    
-    # Apply pagination
-    paginated_result = result[skip:skip+limit]
-    
-    return paginated_result
-
-@router.get("/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(
-    conversation_id: str,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
+    Returns:
+        New conversation with welcome message
     """
-    Get a conversation by ID.
-    """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to access this conversation")
-    
-    return Conversation(**conversation)
-
-@router.delete("/conversations/{conversation_id}", response_model=ResponseBase)
-async def delete_conversation(
-    conversation_id: str,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
-    """
-    Delete a conversation.
-    """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to delete this conversation")
-    
-    # Delete conversation
-    success = await memory_service.delete_conversation(conversation_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete conversation"
-        )
-    
-    return ResponseBase(message="Conversation deleted successfully")
-
-@router.get("/conversations/{conversation_id}/messages", response_model=List[Message])
-async def get_messages(
-    conversation_id: str,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
-    """
-    Get all messages for a conversation.
-    """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to access this conversation")
-    
-    # Get messages
-    messages = await memory_service.get_conversation_history(conversation_id)
-    
-    return [Message(**msg) for msg in messages]
-
-@router.post("/conversations/{conversation_id}/messages", response_model=Message)
-async def send_message(
-    conversation_id: str,
-    message_data: MessageCreate,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
-    """
-    Send a message to a conversation.
-    """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
-    
-    if not conversation:
-        raise NotFoundError("Conversation not found")
-    
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to access this conversation")
-    
-    # Only user messages can be sent through this endpoint
-    if message_data.role != "user":
-        raise ValidationError("Only user messages can be sent through this endpoint")
-    
-    # Send message and get response
-    response = await chat_service.send_message(
-        conversation_id=conversation_id,
-        user_id=current_user.id,
-        content=message_data.content
+    conversation = await chat_service.start_conversation(
+        user_id=current_user["id"],
+        title=request.title,
     )
     
-    return Message(**response)
+    # Get the welcome message (first message in the conversation)
+    messages = await chat_service.get_conversation_history(conversation["id"])
+    welcome_message = messages[0] if messages else None
+    
+    return StartConversationResponse(
+        conversation=conversation,
+        welcome_message=welcome_message
+    )
 
-@router.post("/conversations/{conversation_id}/messages/stream")
-async def stream_message(
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+async def get_conversation(
     conversation_id: str,
-    message_data: MessageCreate,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Get conversation details with messages.
+    
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Conversation details with messages
+    """
+    # Get conversation
+    conversation = await chat_service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    
+    # Check if user owns the conversation
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
+    
+    # Get messages
+    messages = await chat_service.get_conversation_history(conversation_id)
+    
+    # Return conversation with messages
+    return ConversationDetailResponse(
+        **conversation,
+        messages=messages
+    )
+
+
+@router.post("/messages", response_model=SendMessageResponse)
+async def send_message(
+    request: SendMessageRequest,
+    current_user: dict = Depends(get_current_user)
+) -> Any:
+    """
+    Send a message and get a response.
+    
+    Args:
+        request: Send message request with content and conversation ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Response message and updated conversation
+    """
+    # Get conversation to verify ownership
+    conversation = await chat_service.get_conversation(request.conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    
+    # Check if user owns the conversation
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
+    
+    # Set model if specified
+    if request.model:
+        # Update the model in the conversation
+        conversation = await chat_service.update_conversation(
+            request.conversation_id,
+            {"model": request.model}
+        )
+    
+    # Send message and get response
+    response_message = await chat_service.send_message(
+        conversation_id=request.conversation_id,
+        user_id=current_user["id"],
+        content=request.content
+    )
+    
+    # Get updated conversation
+    updated_conversation = await chat_service.get_conversation(request.conversation_id)
+    
+    return SendMessageResponse(
+        message=response_message,
+        conversation=updated_conversation
+    )
+
+
+@router.post("/messages/stream")
+async def stream_message(
+    request: SendMessageRequest,
+    current_user: dict = Depends(get_current_user)
+) -> StreamingResponse:
     """
     Send a message and stream the response.
+    
+    Args:
+        request: Send message request with content and conversation ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Streaming response with message chunks
     """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
-    
+    # Get conversation to verify ownership
+    conversation = await chat_service.get_conversation(request.conversation_id)
     if not conversation:
-        raise NotFoundError("Conversation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
     
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to access this conversation")
+    # Check if user owns the conversation
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
     
-    # Only user messages can be sent through this endpoint
-    if message_data.role != "user":
-        raise ValidationError("Only user messages can be sent through this endpoint")
+    # Set model if specified
+    if request.model:
+        # Update the model in the conversation
+        conversation = await chat_service.update_conversation(
+            request.conversation_id,
+            {"model": request.model}
+        )
     
-    # Stream response
-    async def stream_generator():
+    # Create streaming response
+    async def response_generator():
         async for chunk in chat_service.stream_message(
-            conversation_id=conversation_id,
-            user_id=current_user.id,
-            content=message_data.content
+            conversation_id=request.conversation_id,
+            user_id=current_user["id"],
+            content=request.content
         ):
             yield f"data: {chunk}\n\n"
     
     return StreamingResponse(
-        stream_generator(),
+        response_generator(),
         media_type="text/event-stream"
     )
 
-@router.get("/conversations/{conversation_id}/summary")
-async def get_conversation_summary(
+
+@router.post("/conversations/{conversation_id}/summarize")
+async def summarize_conversation(
     conversation_id: str,
-    current_user: Annotated[User, Depends(get_current_user)]
-):
+    current_user: dict = Depends(get_current_user)
+) -> Any:
     """
-    Get a summary of a conversation.
-    """
-    # Get conversation from database
-    conversation = await memory_service.get_conversation(conversation_id)
+    Generate a summary of a conversation.
     
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Conversation summary
+    """
+    # Get conversation to verify ownership
+    conversation = await chat_service.get_conversation(conversation_id)
     if not conversation:
-        raise NotFoundError("Conversation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
     
-    # Check if the conversation belongs to the current user
-    if conversation["user_id"] != current_user.id:
-        raise ValidationError("Not authorized to access this conversation")
+    # Check if user owns the conversation
+    if conversation["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
     
     # Generate summary
     summary = await chat_service.summarize_conversation(conversation_id)
     
     return {"summary": summary}
+
+
+# WebSocket endpoint for real-time chat
+@router.websocket("/ws/{conversation_id}")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    conversation_id: str,
+    token: str
+):
+    """
+    WebSocket endpoint for real-time chat.
+    
+    Args:
+        websocket: WebSocket connection
+        conversation_id: Conversation ID
+        token: JWT token for authentication
+    """
+    await websocket.accept()
+    
+    try:
+        # Authenticate user with token
+        from jose import jwt
+        from app.core.config import settings
+        from app.api.models.auth import TokenPayload
+        
+        # Decode token
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
+        
+        # Validate token payload
+        token_data = TokenPayload(**payload)
+        
+        # Get user ID
+        user_id = token_data.sub
+        
+        # Get conversation to verify ownership
+        conversation = await chat_service.get_conversation(conversation_id)
+        if not conversation or conversation["user_id"] != user_id:
+            await websocket.close(code=1008, reason="Not authorized")
+            return
+        
+        # Handle messages
+        while True:
+            # Receive message from client
+            data = await websocket.receive_json()
+            
+            # Process message
+            content = data.get("content")
+            if not content:
+                continue
+            
+            # Stream response
+            async for chunk in chat_service.stream_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                content=content
+            ):
+                await websocket.send_json({"chunk": chunk})
+            
+            # Send end of message marker
+            await websocket.send_json({"done": True})
+            
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for conversation {conversation_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}")
+        await websocket.close(code=1011, reason="Server error")
