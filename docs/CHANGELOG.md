@@ -13,3 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added project instructions
 - Added TODO list
 - Added changelog
+- Set up frontend project structure with Next.js, TypeScript, and Tailwind CSS
+- Created home page with Aceternity UI components
+- Added shadcn UI components (button, toast, theme provider)
+- Created utility functions and theme context
+- Set up backend project structure with FastAPI
+- Added configuration and logging modules
+- Created security utilities for JWT authentication
+- Added custom exceptions and exception handlers
