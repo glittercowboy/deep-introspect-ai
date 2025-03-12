@@ -1,167 +1,191 @@
 """
-Authentication routes.
+Authentication API routes.
 """
-import uuid
+from datetime import timedelta
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
-from app.core.config import settings
-from app.core.security import create_access_token, verify_password, get_password_hash
-from app.db.supabase import supabase_client
-from app.core.exceptions import AuthenticationError, NotFoundError
+from pydantic import BaseModel, EmailStr
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+from app.core.config import settings
+from app.core.security import create_access_token
+from app.db.supabase import supabase_client
+from app.core.exceptions import AuthenticationError
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
-# Models for request and response
-class TokenRequest(BaseModel):
-    """Token request model."""
-    username: str
-    password: str
-
-class Token(BaseModel):
-    """Token response model."""
+# Models
+class TokenResponse(BaseModel):
+    """Token response model"""
     access_token: str
     token_type: str
     expires_in: int
     user_id: str
 
-class UserCreate(BaseModel):
-    """User creation model."""
-    email: str
+class SignUpRequest(BaseModel):
+    """Sign up request model"""
+    email: EmailStr
     password: str
-    full_name: Optional[str] = None
+    name: str
 
-class User(BaseModel):
-    """User model."""
+class LoginRequest(BaseModel):
+    """Login request model"""
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    """User response model"""
     id: str
     email: str
-    full_name: Optional[str] = None
-    created_at: datetime
+    name: str
+    created_at: str
+
+@router.post("/signup", response_model=TokenResponse)
+async def sign_up(request: SignUpRequest) -> Dict[str, Any]:
+    """
+    Sign up a new user.
+    
+    Args:
+        request: Sign up request containing email, password, and name
+        
+    Returns:
+        Token response
+    """
+    try:
+        # Sign up with Supabase Auth
+        response = supabase_client.client.auth.sign_up({
+            "email": request.email,
+            "password": request.password
+        })
+        
+        # Check if user was created successfully
+        if not response.user:
+            raise AuthenticationError("Failed to create user")
+        
+        user_id = response.user.id
+        
+        # Create user profile in the database
+        await supabase_client.create_user({
+            "id": user_id,
+            "email": request.email,
+            "name": request.name,
+            "created_at": response.user.created_at,
+            "last_sign_in_at": response.user.last_sign_in_at,
+            "metadata": {}
+        })
+        
+        # Create access token
+        access_token = create_access_token(
+            subject=user_id,
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user_id": user_id
+        }
+    except Exception as e:
+        raise AuthenticationError(f"Error during sign up: {str(e)}")
+
+@router.post("/token", response_model=TokenResponse)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, Any]:
+    """
+    Login to get access token.
+    
+    Args:
+        form_data: OAuth2 form with username (email) and password
+        
+    Returns:
+        Token response
+    """
+    try:
+        # Sign in with Supabase Auth
+        response = supabase_client.client.auth.sign_in_with_password({
+            "email": form_data.username,
+            "password": form_data.password
+        })
+        
+        # Check if login was successful
+        if not response.user:
+            raise AuthenticationError("Invalid credentials")
+        
+        user_id = response.user.id
+        
+        # Create access token
+        access_token = create_access_token(
+            subject=user_id,
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user_id": user_id
+        }
+    except Exception as e:
+        raise AuthenticationError(f"Error during login: {str(e)}")
+
+@router.post("/logout")
+async def logout(token: str = Depends(oauth2_scheme)) -> Dict[str, str]:
+    """
+    Logout and invalidate token.
+    
+    Args:
+        token: Access token
+        
+    Returns:
+        Success message
+    """
+    try:
+        # Sign out with Supabase Auth
+        supabase_client.client.auth.sign_out()
+        
+        return {"message": "Successfully logged out"}
+    except Exception as e:
+        raise AuthenticationError(f"Error during logout: {str(e)}")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     """
-    Get the current user from a JWT token.
+    Get current user from token.
     
     Args:
-        token: JWT token
+        token: Access token
         
     Returns:
         User data
-        
-    Raises:
-        AuthenticationError: If the token is invalid
     """
     try:
-        # Decode the token
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id: str = payload.get("sub")
+        # Verify token and get user ID
+        user = supabase_client.client.auth.get_user(token)
         
-        if user_id is None:
-            raise AuthenticationError("Could not validate credentials")
+        if not user:
+            raise AuthenticationError("Invalid token")
         
-        # Get the user from the database
-        user = await supabase_client.get_user(user_id)
+        # Get user profile from database
+        user_data = await supabase_client.get_user(user.id)
         
-        if user is None:
+        if not user_data:
             raise AuthenticationError("User not found")
         
-        return user
-    except JWTError:
-        raise AuthenticationError("Could not validate credentials")
+        return user_data
+    except Exception as e:
+        raise AuthenticationError(f"Error getting current user: {str(e)}")
 
-@router.post("/register", response_model=User)
-async def register(user_data: UserCreate):
+@router.get("/me", response_model=UserResponse)
+async def get_me(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
-    Register a new user.
+    Get current user profile.
     
     Args:
-        user_data: User registration data
+        user: Current user (from token)
         
     Returns:
-        Created user
+        User profile
     """
-    # Hash the password
-    hashed_password = get_password_hash(user_data.password)
-    
-    # Create the user
-    user = {
-        "id": str(uuid.uuid4()),
-        "email": user_data.email,
-        "password_hash": hashed_password,
-        "full_name": user_data.full_name,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-    }
-    
-    # Store the user in the database
-    created_user = await supabase_client.create_user(user)
-    
-    if not created_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not create user"
-        )
-    
-    # Return the created user (without the password hash)
-    return {
-        "id": created_user["id"],
-        "email": created_user["email"],
-        "full_name": created_user["full_name"],
-        "created_at": datetime.fromisoformat(created_user["created_at"])
-    }
-
-@router.post("/token", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """
-    Login to get an access token.
-    
-    Args:
-        form_data: Username and password
-        
-    Returns:
-        Access token
-    """
-    # Get the user by email
-    user = await supabase_client.get_user_by_email(form_data.username)
-    
-    if not user:
-        raise AuthenticationError("Incorrect email or password")
-    
-    # Verify the password
-    if not verify_password(form_data.password, user["password_hash"]):
-        raise AuthenticationError("Incorrect email or password")
-    
-    # Create the access token
-    expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(user["id"], expires_delta=expires_delta)
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user_id": user["id"]
-    }
-
-@router.get("/me", response_model=User)
-async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Get the current user's information.
-    
-    Args:
-        user: Current user data
-        
-    Returns:
-        User information
-    """
-    return {
-        "id": user["id"],
-        "email": user["email"],
-        "full_name": user["full_name"],
-        "created_at": datetime.fromisoformat(user["created_at"])
-    }
+    return user
