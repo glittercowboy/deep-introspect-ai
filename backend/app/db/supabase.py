@@ -110,6 +110,23 @@ class SupabaseClient:
             logger.error(f"Error updating user {user_id}: {str(e)}")
             return None
     
+    async def delete_user(self, user_id: str) -> bool:
+        """
+        Delete a user.
+        
+        Args:
+            user_id: The user ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            response = self.client.table("users").delete().eq("id", user_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting user {user_id}: {str(e)}")
+            return False
+    
     async def get_conversations(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Get all conversations for a user.
@@ -168,19 +185,19 @@ class SupabaseClient:
             logger.error(f"Error creating conversation: {str(e)}")
             return None
     
-    async def update_conversation(self, conversation_id: str, conversation_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def update_conversation(self, conversation_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Update conversation data.
+        Update a conversation.
         
         Args:
             conversation_id: The conversation ID
-            conversation_data: Conversation data to update
+            data: Data to update
             
         Returns:
             Updated conversation data or None if failed
         """
         try:
-            response = self.client.table("conversations").update(conversation_data).eq("id", conversation_id).execute()
+            response = self.client.table("conversations").update(data).eq("id", conversation_id).execute()
             
             if response.data and len(response.data) > 0:
                 return response.data[0]
@@ -188,6 +205,27 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error updating conversation {conversation_id}: {str(e)}")
             return None
+    
+    async def delete_conversation(self, conversation_id: str) -> bool:
+        """
+        Delete a conversation.
+        
+        Args:
+            conversation_id: The conversation ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Delete all messages first
+            await self.delete_messages(conversation_id)
+            
+            # Delete conversation
+            response = self.client.table("conversations").delete().eq("id", conversation_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting conversation {conversation_id}: {str(e)}")
+            return False
     
     async def get_messages(self, conversation_id: str) -> List[Dict[str, Any]]:
         """
@@ -227,6 +265,23 @@ class SupabaseClient:
             logger.error(f"Error creating message: {str(e)}")
             return None
     
+    async def delete_messages(self, conversation_id: str) -> bool:
+        """
+        Delete all messages for a conversation.
+        
+        Args:
+            conversation_id: The conversation ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            response = self.client.table("messages").delete().eq("conversation_id", conversation_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting messages for conversation {conversation_id}: {str(e)}")
+            return False
+    
     async def get_insights(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Get all insights for a user.
@@ -243,6 +298,24 @@ class SupabaseClient:
             return response.data if response.data else []
         except Exception as e:
             logger.error(f"Error getting insights for user {user_id}: {str(e)}")
+            return []
+    
+    async def get_insights_by_conversation(self, conversation_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all insights for a conversation.
+        
+        Args:
+            conversation_id: The conversation ID
+            
+        Returns:
+            List of insight data
+        """
+        try:
+            response = self.client.table("insights").select("*").eq("conversation_id", conversation_id).order("created_at", desc=True).execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error getting insights for conversation {conversation_id}: {str(e)}")
             return []
     
     async def create_insight(self, insight_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
