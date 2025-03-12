@@ -68,6 +68,18 @@
 - [x] Create insights export functionality
 - [x] Implement multiple view modes (list, graph, summary)
 
+### Notifications System
+- [x] Create notification center component
+- [x] Implement real-time notifications
+- [x] Create notification management (read, dismiss)
+- [x] Integrate notifications with main navigation
+- [x] Create backend notification service
+
+### Documentation & Guides
+- [x] Create self-reflection techniques guide
+- [ ] Create user onboarding guide
+- [ ] Create FAQ page
+
 ### Responsiveness & Design
 - [x] Implement responsive layout for mobile
 - [x] Implement dark mode toggle
@@ -130,7 +142,7 @@
 - [x] Implement insight extraction logic
 - [x] Create pattern recognition algorithms
 - [x] Implement periodic insight generation
-- [ ] Create notification system for new insights
+- [x] Create notification system for new insights
 - [ ] Develop trend analysis for long-term patterns
 
 ## API Development
@@ -169,8 +181,7 @@
 ## Documentation
 
 - [x] Create API documentation
-- [ ] Create user documentation
+- [x] Create user guide for self-reflection techniques
 - [ ] Create developer onboarding guide
 - [ ] Document database schema
 - [ ] Create architecture diagrams
-- [ ] Write user guide for self-reflection techniques
