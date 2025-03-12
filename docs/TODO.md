@@ -72,8 +72,7 @@
 
 ### Database
 - [x] Set up Supabase client
-- [x] Set up Neo4j client
-- [ ] Create database models
+- [x] Create Neo4j client
 - [ ] Implement CRUD operations
 - [ ] Create database migration scripts
 
@@ -95,7 +94,7 @@
 - [x] Integrate with mem0
 - [x] Implement conversation persistence
 - [x] Create context retrieval system
-- [ ] Implement RAG with LlamaIndex
+- [x] Implement RAG system
 - [x] Create semantic search functionality
 
 ### User Insights
@@ -104,12 +103,12 @@
 - [x] Implement periodic insight generation
 - [ ] Create notification system for new insights
 
-### API Routes
-- [ ] Create authentication routes
-- [ ] Create conversation routes
-- [ ] Create message routes
-- [ ] Create insights routes
-- [ ] Create settings routes
+## API Development
+- [ ] Create chat API endpoints
+- [ ] Create user profile API endpoints
+- [ ] Create insights API endpoints
+- [ ] Create authentication API endpoints
+- [ ] Implement WebSocket for real-time chat
 
 ## Testing
 
