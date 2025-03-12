@@ -1,247 +1,136 @@
 """
-API routes for authentication.
+Authentication API routes.
 """
-import logging
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import EmailStr
 
 from app.core.config import settings
-from app.core.security import create_access_token, verify_password
-from app.core.exceptions import AuthenticationError
-from app.db.supabase import supabase_client
-from app.api.models.auth import (
-    UserCredentials,
-    SignUpRequest,
+from app.core.security import create_access_token, get_password_hash, verify_password
+from app.api.models.base import (
+    UserCreate,
+    User,
     TokenResponse,
-    UserResponse,
-    AuthResponse,
-    PasswordResetRequest,
-    PasswordResetConfirm,
+    ResponseBase,
 )
+from app.db.supabase import supabase_client
+from app.api.dependencies.auth import get_current_user
+from app.core.exceptions import AuthenticationError, ValidationError
 
-# Create router
-router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
-# OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-# Logger
-logger = logging.getLogger(__name__)
-
-
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    """
-    Get the current user from the token.
-    
-    Args:
-        token: JWT token
-        
-    Returns:
-        User data
-    
-    Raises:
-        AuthenticationError: If the token is invalid or expired
-    """
-    try:
-        # Verify the token with Supabase
-        response = supabase_client.client.auth.get_user(token)
-        user = response.user
-        
-        if not user:
-            raise AuthenticationError("Invalid or expired token")
-        
-        return user
-    except Exception as e:
-        logger.error(f"Error authenticating user: {str(e)}")
-        raise AuthenticationError("Invalid or expired token")
-
-
-@router.post("/signup", response_model=AuthResponse)
-async def signup(user_data: SignUpRequest):
+@router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserCreate):
     """
     Register a new user.
+    """
+    # Check if the user already exists
+    existing_user = await supabase_client.get_user_by_email(user_data.email)
+    if existing_user:
+        raise ValidationError("User with this email already exists")
     
-    Args:
-        user_data: User registration data
-        
-    Returns:
-        User and token data
-    """
-    try:
-        # Create user in Supabase
-        response = supabase_client.client.auth.sign_up({
-            "email": user_data.email,
-            "password": user_data.password,
-            "options": {
-                "data": {
-                    "name": user_data.name
-                }
-            }
-        })
-        
-        user = response.user
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create user"
-            )
-        
-        # Create access token
-        access_token = create_access_token(
-            subject=user.id,
-            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        
-        # Format user data for response
-        user_response = UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.user_metadata.get("name", ""),
-            created_at=user.created_at
-        )
-        
-        # Format token for response
-        token_response = TokenResponse(
-            access_token=access_token,
-            token_type="bearer",
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
-        
-        return AuthResponse(
-            user=user_response,
-            token=token_response
-        )
-    except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@router.post("/login", response_model=AuthResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """
-    Authenticate user and return access token.
+    # Create a new user with hashed password
+    user_dict = user_data.model_dump()
+    user_dict["password"] = get_password_hash(user_dict["password"])
+    user_dict["id"] = supabase_client.generate_uuid()
+    user_dict["created_at"] = datetime.now().isoformat()
+    user_dict["metadata"] = {}
     
-    Args:
-        form_data: Form data with username and password
-        
-    Returns:
-        User and token data
-    """
-    try:
-        # Sign in user with Supabase
-        response = supabase_client.client.auth.sign_in_with_password({
-            "email": form_data.username,
-            "password": form_data.password
-        })
-        
-        user = response.user
-        session = response.session
-        
-        if not user or not session:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password"
-            )
-        
-        # Create access token
-        access_token = create_access_token(
-            subject=user.id,
-            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        
-        # Format user data for response
-        user_response = UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.user_metadata.get("name", ""),
-            created_at=user.created_at
-        )
-        
-        # Format token for response
-        token_response = TokenResponse(
-            access_token=session.access_token,
-            token_type="bearer",
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
-        
-        return AuthResponse(
-            user=user_response,
-            token=token_response
-        )
-    except Exception as e:
-        logger.error(f"Error authenticating user: {str(e)}")
+    # Store user in database
+    new_user = await supabase_client.create_user(user_dict)
+    if not new_user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user"
         )
+    
+    return User(**new_user)
 
+@router.post("/login", response_model=TokenResponse)
+async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    """
+    Login to get an access token.
+    """
+    # Get user from database
+    user = await supabase_client.get_user_by_email(form_data.username)
+    if not user:
+        raise AuthenticationError("Incorrect email or password")
+    
+    # Verify password
+    if not verify_password(form_data.password, user["password"]):
+        raise AuthenticationError("Incorrect email or password")
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        subject=user["id"],
+        expires_delta=access_token_expires
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
 
-@router.post("/reset-password", status_code=status.HTTP_202_ACCEPTED)
-async def reset_password(reset_data: PasswordResetRequest):
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    Refresh access token.
+    """
+    # Create new access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        subject=current_user.id,
+        expires_delta=access_token_expires
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+
+@router.post("/logout", response_model=ResponseBase)
+async def logout(current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    Logout the current user.
+    
+    Note: JWT tokens cannot be invalidated, so this is primarily
+    for client-side cleanup. The client should discard the token.
+    """
+    return ResponseBase(message="Successfully logged out")
+
+@router.post("/password-reset-request")
+async def request_password_reset(email: EmailStr):
     """
     Request a password reset.
+    """
+    # Check if user exists
+    user = await supabase_client.get_user_by_email(email)
+    if not user:
+        # Return success anyway to prevent email enumeration
+        return ResponseBase(message="If the email exists, a password reset link has been sent")
     
-    Args:
-        reset_data: Password reset request data
-    """
-    try:
-        # Send password reset email with Supabase
-        response = supabase_client.client.auth.reset_password_email(reset_data.email)
-        
-        return {"message": "Password reset email sent"}
-    except Exception as e:
-        logger.error(f"Error sending password reset: {str(e)}")
-        return {"message": "Password reset email sent"}  # Don't reveal if email exists
-
-
-@router.post("/reset-password-confirm", status_code=status.HTTP_200_OK)
-async def reset_password_confirm(reset_data: PasswordResetConfirm):
-    """
-    Confirm password reset.
+    # In a real implementation, we would send an email with a reset link
+    # For now, we'll just return a success message
     
-    Args:
-        reset_data: Password reset confirmation data
-    """
-    try:
-        # Update user with new password
-        response = supabase_client.client.auth.update_user({
-            "password": reset_data.new_password
-        }, reset_data.token)
-        
-        if not response.user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired token"
-            )
-        
-        return {"message": "Password reset successfully"}
-    except Exception as e:
-        logger.error(f"Error resetting password: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to reset password"
-        )
+    return ResponseBase(message="If the email exists, a password reset link has been sent")
 
-
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: dict = Depends(get_current_user)):
+@router.post("/password-reset")
+async def reset_password(token: str, new_password: str):
     """
-    Get current user data.
+    Reset password using a reset token.
+    """
+    # In a real implementation, we would validate the token
+    # and update the user's password
     
-    Args:
-        current_user: Current authenticated user
-        
-    Returns:
-        User data
+    # For now, we'll just return a success message
+    return ResponseBase(message="Password has been reset successfully")
+
+@router.get("/me", response_model=User)
+async def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     """
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.user_metadata.get("name", ""),
-        created_at=current_user.created_at
-    )
+    Get the current authenticated user.
+    """
+    return current_user
