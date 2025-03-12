@@ -1,232 +1,205 @@
 """
-Chat API routes.
+Chat routes for the API.
 """
-import logging
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import uuid
+from datetime import datetime
+
 from app.services.chat.chat_service import chat_service
-from app.core.exceptions import NotFoundError, DatabaseError
+from app.core.exceptions import NotFoundError, AuthorizationError
+from app.api.routes.users import get_current_user
 
-logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/chat", tags=["Chat"])
 
-router = APIRouter(prefix="/v1/chat", tags=["chat"])
-
-
-class MessageRequest(BaseModel):
-    """Message request model."""
-    content: str = Field(..., description="Message content")
-    
-    class Config:
-        """Pydantic config."""
-        schema_extra = {
-            "example": {
-                "content": "Hello, I'm feeling anxious about my upcoming job interview."
-            }
-        }
-
-
-class MessageResponse(BaseModel):
-    """Message response model."""
-    id: str = Field(..., description="Message ID")
-    conversation_id: str = Field(..., description="Conversation ID")
-    role: str = Field(..., description="Message role (user or assistant)")
-    content: str = Field(..., description="Message content")
-    created_at: str = Field(..., description="Creation timestamp")
-    
-    class Config:
-        """Pydantic config."""
-        schema_extra = {
-            "example": {
-                "id": "123e4567-e89b-12d3-a456-426614174000",
-                "conversation_id": "123e4567-e89b-12d3-a456-426614174001",
-                "role": "assistant",
-                "content": "I understand feeling anxious about interviews. Let's talk about what specifically concerns you.",
-                "created_at": "2025-01-01T00:00:00Z"
-            }
-        }
-
+# Models
+class ConversationCreate(BaseModel):
+    """Conversation creation model."""
+    title: Optional[str] = None
 
 class ConversationResponse(BaseModel):
     """Conversation response model."""
-    id: str = Field(..., description="Conversation ID")
-    user_id: str = Field(..., description="User ID")
-    title: str = Field(..., description="Conversation title")
-    created_at: str = Field(..., description="Creation timestamp")
-    updated_at: str = Field(..., description="Last update timestamp")
-    
-    class Config:
-        """Pydantic config."""
-        schema_extra = {
-            "example": {
-                "id": "123e4567-e89b-12d3-a456-426614174001",
-                "user_id": "123e4567-e89b-12d3-a456-426614174002",
-                "title": "Conversation about interview anxiety",
-                "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T01:00:00Z"
-            }
-        }
+    id: str
+    title: str
+    user_id: str
+    created_at: str
+    updated_at: str
+    model: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
+class MessageCreate(BaseModel):
+    """Message creation model."""
+    content: str
 
-class ConversationRequest(BaseModel):
-    """Conversation request model."""
-    title: Optional[str] = Field(None, description="Conversation title")
-    
-    class Config:
-        """Pydantic config."""
-        schema_extra = {
-            "example": {
-                "title": "Conversation about interview anxiety"
-            }
-        }
+class MessageResponse(BaseModel):
+    """Message response model."""
+    id: str
+    conversation_id: str
+    role: str
+    content: str
+    created_at: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
+class ConversationSummary(BaseModel):
+    """Conversation summary model."""
+    summary: str
 
-@router.post("/conversations", response_model=ConversationResponse)
+@router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
-    request: ConversationRequest,
-    user_id: str = "test-user"  # TODO: Get from auth
-) -> Dict[str, Any]:
+    conversation: ConversationCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
     """
     Create a new conversation.
     """
-    try:
-        conversation = await chat_service.start_conversation(user_id, request.title)
-        return conversation
-    except Exception as e:
-        logger.error(f"Error creating conversation: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create conversation"
-        )
+    # Start conversation
+    result = await chat_service.start_conversation(
+        user_id=current_user["id"],
+        title=conversation.title
+    )
+    
+    return result
 
-
-@router.get("/conversations", response_model=List[ConversationResponse])
+@router.get("", response_model=List[ConversationResponse])
 async def list_conversations(
-    user_id: str = "test-user"  # TODO: Get from auth
-) -> List[Dict[str, Any]]:
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
     """
-    List all conversations for a user.
+    List all conversations for the current user.
     """
-    try:
-        from app.db.supabase import supabase_client
-        conversations = await supabase_client.get_conversations(user_id)
-        return conversations
-    except Exception as e:
-        logger.error(f"Error listing conversations: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list conversations"
-        )
+    from app.db.supabase import supabase_client
+    
+    conversations = await supabase_client.get_conversations(current_user["id"])
+    return conversations
 
-
-@router.get("/conversations/{conversation_id}", response_model=List[MessageResponse])
-async def get_conversation_messages(
+@router.get("/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
     conversation_id: str,
-    user_id: str = "test-user"  # TODO: Get from auth
-) -> List[Dict[str, Any]]:
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
     """
-    Get all messages for a conversation.
+    Get a specific conversation by ID.
     """
-    try:
-        messages = await chat_service.get_conversation_history(conversation_id)
-        return messages
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error getting conversation messages: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get conversation messages"
-        )
+    from app.db.supabase import supabase_client
+    
+    conversation = await supabase_client.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError("Conversation not found")
+    
+    # Verify ownership
+    if conversation["user_id"] != current_user["id"]:
+        raise AuthorizationError("Not authorized to access this conversation")
+    
+    return conversation
 
-
-@router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
+@router.post("/{conversation_id}/messages", response_model=MessageResponse)
 async def send_message(
     conversation_id: str,
-    request: MessageRequest,
-    user_id: str = "test-user"  # TODO: Get from auth
-) -> Dict[str, Any]:
+    message: MessageCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
     """
-    Send a message to a conversation.
+    Send a message in a conversation and get a response.
     """
-    try:
-        response = await chat_service.send_message(
-            conversation_id,
-            user_id,
-            request.content
-        )
-        return response
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error sending message: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send message"
-        )
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and user has access
+    conversation = await supabase_client.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError("Conversation not found")
+    
+    if conversation["user_id"] != current_user["id"]:
+        raise AuthorizationError("Not authorized to access this conversation")
+    
+    # Send message and get response
+    response = await chat_service.send_message(
+        conversation_id=conversation_id,
+        user_id=current_user["id"],
+        content=message.content
+    )
+    
+    return response
 
-
-@router.post("/conversations/{conversation_id}/messages/stream")
+@router.post("/{conversation_id}/messages/stream")
 async def stream_message(
     conversation_id: str,
-    request: MessageRequest,
-    user_id: str = "test-user"  # TODO: Get from auth
+    message: MessageCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ) -> StreamingResponse:
     """
-    Send a message to a conversation and stream the response.
+    Send a message in a conversation and get a streaming response.
     """
-    try:
-        async def generate():
-            async for chunk in chat_service.stream_message(
-                conversation_id,
-                user_id,
-                request.content
-            ):
-                yield f"data: {chunk}\n\n"
-        
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream"
-        )
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error streaming message: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to stream message"
-        )
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and user has access
+    conversation = await supabase_client.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError("Conversation not found")
+    
+    if conversation["user_id"] != current_user["id"]:
+        raise AuthorizationError("Not authorized to access this conversation")
+    
+    # Create streaming response
+    async def event_generator():
+        async for chunk in chat_service.stream_message(
+            conversation_id=conversation_id,
+            user_id=current_user["id"],
+            content=message.content
+        ):
+            yield f"data: {chunk}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
 
+@router.get("/{conversation_id}/messages", response_model=List[MessageResponse])
+async def get_conversation_messages(
+    conversation_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
+    """
+    Get all messages in a conversation.
+    """
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and user has access
+    conversation = await supabase_client.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError("Conversation not found")
+    
+    if conversation["user_id"] != current_user["id"]:
+        raise AuthorizationError("Not authorized to access this conversation")
+    
+    # Get messages
+    messages = await chat_service.get_conversation_history(conversation_id)
+    return messages
 
-@router.get("/conversations/{conversation_id}/summary")
+@router.get("/{conversation_id}/summary", response_model=ConversationSummary)
 async def get_conversation_summary(
     conversation_id: str,
-    user_id: str = "test-user"  # TODO: Get from auth
-) -> Dict[str, Any]:
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Any:
     """
     Get a summary of a conversation.
     """
-    try:
-        summary = await chat_service.summarize_conversation(conversation_id)
-        return {"summary": summary}
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error getting conversation summary: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get conversation summary"
-        )
+    from app.db.supabase import supabase_client
+    
+    # Verify conversation exists and user has access
+    conversation = await supabase_client.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise NotFoundError("Conversation not found")
+    
+    if conversation["user_id"] != current_user["id"]:
+        raise AuthorizationError("Not authorized to access this conversation")
+    
+    # Get summary
+    summary = await chat_service.summarize_conversation(conversation_id)
+    return {"summary": summary}
