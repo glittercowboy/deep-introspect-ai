@@ -1,61 +1,112 @@
 """
-Authentication and authorization dependencies.
+Authentication dependencies for FastAPI.
 """
-from typing import Annotated, Optional
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jose import jwt, JWTError
+from pydantic import ValidationError
 from app.core.config import settings
-from app.core.exceptions import AuthenticationError
 from app.db.supabase import supabase_client
-from app.api.models.base import User, TokenData
+from app.api.models.auth import TokenPayload
+from app.core.exceptions import AuthenticationError
 
+# OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     """
-    Get the current authenticated user from the JWT token.
+    Get the current authenticated user from the token.
     
     Args:
-        token: JWT token from OAuth2PasswordBearer
+        token: JWT token from OAuth2 scheme
         
     Returns:
-        Current authenticated user
+        User data dictionary
         
     Raises:
-        AuthenticationError: If authentication fails
+        AuthenticationError: If the token is invalid or the user doesn't exist
     """
     try:
-        # Decode the JWT token
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id: str = payload.get("sub")
+        # Decode the token
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
         
-        if user_id is None:
-            raise AuthenticationError("Could not validate credentials")
+        # Validate token payload
+        token_data = TokenPayload(**payload)
         
-        token_data = TokenData(sub=user_id, exp=payload.get("exp"))
-    except JWTError:
-        raise AuthenticationError("Could not validate credentials")
-    
-    # Get user from database
-    user = await supabase_client.get_user(user_id)
-    
-    if user is None:
-        raise AuthenticationError("User not found")
-    
-    return User(**user)
+        # Check if token is expired
+        if token_data.exp < int(import_module("time").time()):
+            raise AuthenticationError("Token expired")
+        
+        # Get user ID from token
+        user_id = token_data.sub
+        if not user_id:
+            raise AuthenticationError("Invalid token")
+        
+        # Get user from database
+        user = await supabase_client.get_user(user_id)
+        if not user:
+            raise AuthenticationError("User not found")
+        
+        return user
+        
+    except (JWTError, ValidationError):
+        raise AuthenticationError("Invalid authentication credentials")
 
-async def get_optional_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Optional[User]:
+
+async def get_current_active_user(
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     """
-    Get the current authenticated user if a token is provided, otherwise return None.
+    Get the current active user.
     
     Args:
-        token: JWT token from OAuth2PasswordBearer
+        current_user: User data from get_current_user
         
     Returns:
-        Current authenticated user or None
+        User data dictionary
+        
+    Raises:
+        AuthenticationError: If the user is disabled
     """
+    if current_user.get("is_disabled"):
+        raise AuthenticationError("Inactive user")
+    
+    return current_user
+
+
+def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[dict]:
+    """
+    Get the current user if authenticated, otherwise return None.
+    
+    Args:
+        token: Optional JWT token from OAuth2 scheme
+        
+    Returns:
+        User data dictionary or None if not authenticated
+    """
+    if not token:
+        return None
+    
     try:
-        return await get_current_user(token)
-    except HTTPException:
+        # Decode the token
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
+        
+        # Validate token payload
+        token_data = TokenPayload(**payload)
+        
+        # Get user ID from token
+        user_id = token_data.sub
+        if not user_id:
+            return None
+        
+        # Get user from database
+        user = await supabase_client.get_user(user_id)
+        return user
+    except (JWTError, ValidationError):
         return None
