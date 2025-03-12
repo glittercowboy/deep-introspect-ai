@@ -2,6 +2,13 @@
 
 A groundbreaking self-reflection AI chatbot that learns deeply about users through conversation. It helps users understand themselves and their life patterns, facilitating personal growth through AI-assisted introspection.
 
+<div align="center">
+  <kbd>
+    <img src="https://github.com/glittercowboy/deep-introspect-ai/assets/username/screenshot.png" alt="DeepIntrospect AI Screenshot" width="600"/>
+  </kbd>
+  <p><em>Note: Replace with actual screenshot when available</em></p>
+</div>
+
 ## Overview
 
 DeepIntrospect AI creates a comprehensive understanding of users through natural conversation, building connections between information in a knowledge graph, and provides insights that help with personal growth and self-understanding.
@@ -50,7 +57,18 @@ DeepIntrospect AI creates a comprehensive understanding of users through natural
 project/
 ├── frontend/               # Next.js frontend application
 │   ├── app/                # App router pages
+│   │   ├── api/            # API routes
+│   │   ├── chat/           # Chat interface
+│   │   ├── dashboard/      # User dashboard
+│   │   ├── insights/       # User insights
+│   │   ├── settings/       # User settings
+│   │   ├── layout.tsx      # Root layout
+│   │   └── page.tsx        # Home page
 │   ├── components/         # Reusable React components
+│   │   ├── ui/             # UI components
+│   │   ├── layout/         # Layout components 
+│   │   ├── chat/           # Chat components
+│   │   └── insights/       # Insights components
 │   ├── lib/                # Utility functions and API clients
 │   └── tests/              # Frontend tests
 ├── backend/                # FastAPI backend application
@@ -59,11 +77,21 @@ project/
 │   │   ├── core/           # Core configurations
 │   │   ├── db/             # Database clients
 │   │   └── services/       # Business logic services
+│   │       ├── chat/       # Chat service
+│   │       ├── insights/   # Insights service
+│   │       ├── knowledge/  # Knowledge graph service
+│   │       ├── llm/        # LLM integration
+│   │       └── memory/     # Memory service
 │   └── tests/              # Backend tests
 └── docs/                   # Project documentation
+    ├── ARCHITECTURE.md     # System architecture documentation
+    ├── CHANGELOG.md        # History of changes
+    ├── DEVELOPER.md        # Developer onboarding guide
+    ├── PROJECT_INSTRUCTIONS.md # Project architecture and standards
+    └── TODO.md             # Development tasks and progress
 ```
 
-## Detailed Setup Guide
+## Comprehensive Setup Guide
 
 ### Prerequisites
 
@@ -91,10 +119,8 @@ cd frontend
 # Install dependencies
 npm install
 
-# Create environment file
-cp .env.example .env.local
-
-# Edit .env.local with your API keys and configuration
+# Create environment file (if not using .env.example)
+touch .env.local
 ```
 
 Required variables in `.env.local`:
@@ -110,17 +136,15 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 # Navigate to backend directory
 cd ../backend
 
-# Create and activate virtual environment (optional but recommended)
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Create environment file
-cp .env.example .env
-
-# Edit .env with your API keys and configuration
+# Create environment file (if not using .env.example)
+touch .env
 ```
 
 Required variables in `.env`:
@@ -139,24 +163,75 @@ MEM0_API_KEY=your_mem0_api_key
 
 #### Supabase Setup
 
-1. Create a new Supabase project
-2. Run the database initialization SQL scripts:
-   ```bash
-   cd scripts
-   supabase db push
-   ```
+1. Create a new Supabase project at [supabase.com](https://supabase.com)
+2. Create the following tables in the Supabase dashboard:
+
+**Users Table**
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  last_login TIMESTAMP WITH TIME ZONE,
+  display_name TEXT,
+  profile_image_url TEXT,
+  settings JSONB DEFAULT '{}'::JSONB
+);
+```
+
+**Conversations Table**
+```sql
+CREATE TABLE conversations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) NOT NULL,
+  title TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  model TEXT DEFAULT 'anthropic',
+  metadata JSONB DEFAULT '{}'::JSONB
+);
+```
+
+**Messages Table**
+```sql
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  conversation_id UUID REFERENCES conversations(id) NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  metadata JSONB DEFAULT '{}'::JSONB
+);
+```
+
+**Insights Table**
+```sql
+CREATE TABLE insights (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) NOT NULL,
+  conversation_id UUID REFERENCES conversations(id),
+  type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  evidence TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  confidence FLOAT DEFAULT 0.5,
+  metadata JSONB DEFAULT '{}'::JSONB
+);
+```
+
 3. Set up Row Level Security (RLS) policies for each table
-4. Create storage buckets if needed
 
 #### Neo4j Setup
 
-1. Create a Neo4j database (AuraDB or local)
-2. Run initialization Cypher scripts to create constraints:
-   ```cypher
-   CREATE CONSTRAINT user_id IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE;
-   CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE;
-   // Additional constraints in backend/app/db/neo4j.py
-   ```
+1. Create a Neo4j database on [Neo4j Aura](https://neo4j.com/cloud/aura/) or install locally
+2. Copy the connection URI, username, and password
+3. The application will create necessary constraints on startup (defined in `backend/app/db/neo4j.py`)
+
+#### mem0 Setup
+
+1. Sign up for mem0 API at [mem0.ai](https://mem0.ai)
+2. Get your API key from the dashboard
+3. Add it to your backend `.env` file
 
 ### Step 5: Start Development Servers
 
@@ -175,6 +250,38 @@ uvicorn main:app --reload
 Backend API will be available at: http://localhost:8000
 
 API documentation will be at: http://localhost:8000/api/docs
+
+## Data Flow Architecture
+
+DeepIntrospect AI follows a clean architecture pattern with clear separation between frontend and backend:
+
+```
+┌────────────┐        ┌────────────┐        ┌────────────┐
+│            │        │            │        │            │
+│  Frontend  │◄─────► │  Backend   │◄─────► │ Databases  │
+│  (Next.js) │        │  (FastAPI) │        │ & Services │
+│            │        │            │        │            │
+└────────────┘        └────────────┘        └────────────┘
+```
+
+When a user sends a message to the AI, the following happens:
+
+1. Frontend sends message to backend API
+2. Message is stored in Supabase and mem0
+3. Relevant context is retrieved from memory system
+4. LLM (OpenAI/Anthropic) generates a response
+5. Response is streamed back to the user in real-time
+6. In the background, the message is analyzed to extract:
+   - Entities (people, places, things)
+   - Concepts (abstract ideas)
+   - Beliefs (what the user believes to be true)
+   - Values (what matters to the user)
+   - Patterns (recurring behaviors or thoughts)
+7. This extracted information is stored in the Neo4j knowledge graph
+8. Insights are generated from patterns in the knowledge graph
+9. Insights are stored in Supabase for display on the dashboard
+
+For a detailed architecture overview, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Running Tests
 
@@ -232,29 +339,53 @@ python -m pytest -v                # Verbose output
 
 ## Additional Resources
 
-- [Project Instructions](./docs/PROJECT_INSTRUCTIONS.md) - Detailed project architecture and standards
+- [Developer Onboarding Guide](./docs/DEVELOPER.md) - Comprehensive guide for new developers
+- [Architecture Documentation](./docs/ARCHITECTURE.md) - Detailed system architecture
+- [Project Instructions](./docs/PROJECT_INSTRUCTIONS.md) - Project architecture and standards
 - [TODO List](./docs/TODO.md) - Current development tasks and progress
 - [Changelog](./docs/CHANGELOG.md) - History of changes and features
-- [User Guide](./app/guide) - User guide for self-reflection techniques
-- [API Documentation](http://localhost:8000/api/docs) - Interactive API documentation (when backend is running)
+- [API Documentation](http://localhost:8000/api/docs) - Interactive API docs (when backend is running)
 
 ## Troubleshooting
 
 ### Common Issues
 
 #### Frontend
-- **Module not found errors**: Ensure all dependencies are installed (`npm install`)
-- **Type errors**: Make sure TypeScript definitions are correct
-- **API connection errors**: Verify backend is running and CORS is configured correctly
+
+- **Module not found errors**
+  - Ensure all dependencies are installed (`npm install`)
+  - Check import paths, especially for `@/` imports
+  - Verify tsconfig.json paths configuration
+
+- **Type errors**
+  - Make sure TypeScript definitions are correct
+  - Run `npm run typecheck` to validate types
+
+- **API connection errors**
+  - Verify backend is running and CORS is configured correctly
+  - Check that API URL in .env.local is correct
+  - Inspect browser console for specific error messages
 
 #### Backend
-- **Database connection errors**: Check your connection strings in `.env`
-- **API key errors**: Verify all API keys are correct and have necessary permissions
-- **Dependency issues**: Ensure you're using the correct Python version (3.9+)
+
+- **Database connection errors**
+  - Check your connection strings in `.env`
+  - Verify database credentials have correct permissions
+  - Ensure database tables are created with the right schema
+
+- **API key errors**
+  - Verify all API keys are correct and have necessary permissions
+  - Check for API rate limiting or quota issues
+
+- **Dependency issues**
+  - Ensure you're using the correct Python version (3.9+)
+  - Try recreating virtual environment if dependencies conflict
+
+For more detailed troubleshooting, see the [Developer Onboarding Guide](./docs/DEVELOPER.md).
 
 ## Contributing
 
-Please read the [Project Instructions](./docs/PROJECT_INSTRUCTIONS.md) for details on our code structure and development process.
+Please read the [Developer Onboarding Guide](./docs/DEVELOPER.md) and [Project Instructions](./docs/PROJECT_INSTRUCTIONS.md) for details on our code structure and development process.
 
 ## License
 
