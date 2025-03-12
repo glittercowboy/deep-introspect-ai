@@ -71,14 +71,13 @@
 - [ ] Set up user roles and permissions
 
 ### Database
-- [x] Set up Supabase database client
-- [x] Set up Neo4j database client
+- [x] Set up Supabase client
 - [ ] Create database models
 - [ ] Implement CRUD operations
 - [ ] Create database migration scripts
 
 ### Neo4j Knowledge Graph
-- [x] Set up Neo4j connection
+- [x] Set up Neo4j client
 - [x] Design knowledge graph schema
 - [x] Implement node and relationship creation
 - [x] Create graph query functions
@@ -104,12 +103,13 @@
 - [x] Implement periodic insight generation
 - [ ] Create notification system for new insights
 
-## API Routes
-- [ ] Create authentication routes
-- [ ] Create conversation routes
-- [ ] Create message routes
-- [ ] Create insights routes
-- [ ] Create user profile routes
+## API Development
+- [ ] Create API routes for authentication
+- [ ] Create API routes for chat
+- [ ] Create API routes for users
+- [ ] Create API routes for insights
+- [ ] Add request/response validation
+- [ ] Implement error handling
 
 ## Testing
 
