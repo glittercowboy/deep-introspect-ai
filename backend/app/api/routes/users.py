@@ -1,144 +1,154 @@
 """
 User API routes.
 """
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Body
-from app.api.models.user import User, UserUpdate, UserResponse
-from app.services.insights.insights_service import insights_service
-from app.api.dependencies.auth import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+from datetime import datetime
 from app.db.supabase import supabase_client
+from app.api.routes.auth import get_current_user
+from app.core.exceptions import NotFoundError
 
-router = APIRouter(prefix="/v1/users", tags=["Users"])
+router = APIRouter(prefix="/users", tags=["users"])
 
-@router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
-    current_user: User = Depends(get_current_user)
+# Models for request and response
+class UserProfile(BaseModel):
+    """User profile model."""
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    created_at: datetime
+    preferences: Dict[str, Any] = {}
+
+class UserProfileUpdate(BaseModel):
+    """User profile update model."""
+    full_name: Optional[str] = None
+    preferences: Optional[Dict[str, Any]] = None
+
+class UserStats(BaseModel):
+    """User statistics model."""
+    conversation_count: int
+    message_count: int
+    insight_count: int
+    last_activity: Optional[datetime] = None
+    total_tokens_used: int = 0
+
+@router.get("/me", response_model=UserProfile)
+async def get_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get the current user's profile.
+    
+    Args:
+        current_user: Current user data
+        
+    Returns:
+        User profile
+    """
+    # We already have most of the user data from the dependency
+    # Just format it to match the response model
+    profile = {
+        "id": current_user["id"],
+        "email": current_user["email"],
+        "full_name": current_user.get("full_name"),
+        "created_at": datetime.fromisoformat(current_user["created_at"]),
+        "preferences": current_user.get("preferences", {})
+    }
+    
+    return profile
+
+@router.patch("/me", response_model=UserProfile)
+async def update_profile(
+    profile_update: UserProfileUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get the current user information.
-    """
-    # Get user from database
-    user_data = await supabase_client.get_user(current_user.id)
+    Update the current user's profile.
     
-    if not user_data:
-        raise HTTPException(status_code=404, detail="User not found")
+    Args:
+        profile_update: Profile data to update
+        current_user: Current user data
+        
+    Returns:
+        Updated user profile
+    """
+    # Build update data
+    update_data = {}
     
-    return user_data
-
-@router.patch("/me", response_model=UserResponse)
-async def update_current_user(
-    user_update: UserUpdate,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Update the current user information.
-    """
-    # Update user in database
-    updated_user = await supabase_client.update_user(
-        user_id=current_user.id,
-        user_data=user_update.dict(exclude_unset=True)
-    )
+    if profile_update.full_name is not None:
+        update_data["full_name"] = profile_update.full_name
+        
+    if profile_update.preferences is not None:
+        # Merge with existing preferences
+        existing_prefs = current_user.get("preferences", {})
+        update_data["preferences"] = {**existing_prefs, **profile_update.preferences}
+    
+    if not update_data:
+        # No changes requested
+        return await get_profile(current_user)
+    
+    # Update the user in the database
+    updated_user = await supabase_client.update_user(current_user["id"], update_data)
     
     if not updated_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update profile"
+        )
     
-    return updated_user
-
-@router.get("/me/insights")
-async def get_user_insights(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get insights for the current user.
-    """
-    insights = await insights_service.get_user_insights(current_user.id)
-    
+    # Return the updated profile
     return {
-        "insights": insights
+        "id": updated_user["id"],
+        "email": updated_user["email"],
+        "full_name": updated_user.get("full_name"),
+        "created_at": datetime.fromisoformat(updated_user["created_at"]),
+        "preferences": updated_user.get("preferences", {})
     }
 
-@router.get("/me/summary")
-async def get_user_summary(
-    current_user: User = Depends(get_current_user)
-):
+@router.get("/me/stats", response_model=UserStats)
+async def get_user_stats(current_user: Dict[str, Any] = Depends(get_current_user)):
     """
-    Get a summary of the current user based on insights.
+    Get the current user's statistics.
+    
+    Args:
+        current_user: Current user data
+        
+    Returns:
+        User statistics
     """
-    summary = await insights_service.generate_user_summary(current_user.id)
+    user_id = current_user["id"]
     
-    return summary
-
-@router.get("/me/insights/graph")
-async def get_user_insights_graph(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get a visual graph of the current user's insights.
-    """
-    graph = await insights_service.generate_insight_graph(current_user.id)
+    # Get conversations
+    conversations = await supabase_client.get_conversations(user_id)
+    conversation_count = len(conversations)
     
-    return graph
-
-@router.get("/me/knowledge")
-async def get_user_knowledge(
-    current_user: User = Depends(get_current_user),
-    depth: int = Query(2, ge=1, le=5)
-):
-    """
-    Get the knowledge graph for the current user.
-    """
-    from app.services.knowledge.knowledge_service import knowledge_service
+    # Get message count (across all conversations)
+    message_count = 0
+    for conversation in conversations:
+        messages = await supabase_client.get_messages(conversation["id"])
+        message_count += len(messages)
     
-    graph = await knowledge_service.get_user_knowledge_graph(
-        user_id=current_user.id,
-        depth=depth
-    )
+    # Get insights
+    insights = await supabase_client.get_insights(user_id)
+    insight_count = len(insights)
     
-    return graph
-
-@router.get("/me/preferences")
-async def get_user_preferences(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get user preferences.
-    """
-    # Get user from database
-    user_data = await supabase_client.get_user(current_user.id)
+    # Determine last activity
+    last_activity = None
+    if conversations:
+        # Sort conversations by updated_at
+        sorted_conversations = sorted(
+            conversations,
+            key=lambda c: c.get("updated_at", c.get("created_at")),
+            reverse=True
+        )
+        last_activity_str = sorted_conversations[0].get("updated_at", sorted_conversations[0].get("created_at"))
+        if last_activity_str:
+            last_activity = datetime.fromisoformat(last_activity_str)
     
-    if not user_data:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Return preferences if they exist
-    preferences = user_data.get("preferences", {})
-    
-    return preferences
-
-@router.patch("/me/preferences")
-async def update_user_preferences(
-    preferences: Dict[str, Any] = Body(...),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Update user preferences.
-    """
-    # Get current user data
-    user_data = await supabase_client.get_user(current_user.id)
-    
-    if not user_data:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Update preferences
-    current_preferences = user_data.get("preferences", {})
-    updated_preferences = {**current_preferences, **preferences}
-    
-    # Update user in database
-    updated_user = await supabase_client.update_user(
-        user_id=current_user.id,
-        user_data={"preferences": updated_preferences}
-    )
-    
-    if not updated_user:
-        raise HTTPException(status_code=500, detail="Failed to update preferences")
-    
-    return updated_preferences
+    # Return stats
+    return {
+        "conversation_count": conversation_count,
+        "message_count": message_count,
+        "insight_count": insight_count,
+        "last_activity": last_activity,
+        "total_tokens_used": current_user.get("total_tokens_used", 0)
+    }
