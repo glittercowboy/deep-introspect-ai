@@ -1,67 +1,48 @@
 """
-Authentication models.
+API models for authentication.
 """
-from typing import Dict, List, Optional, Any
-from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, validator
-from app.api.models.user import UserResponse
+from typing import Optional
+from pydantic import BaseModel, Field, EmailStr
 
-class Token(BaseModel):
-    """Token model."""
-    access_token: str
-    token_type: str
-    user_id: str
 
-class TokenPayload(BaseModel):
-    """Token payload model."""
-    sub: Optional[str] = None
-    exp: Optional[int] = None
+class UserCredentials(BaseModel):
+    """Schema for user login credentials."""
+    email: EmailStr = Field(..., description="User's email")
+    password: str = Field(..., description="User's password", min_length=8)
 
-class LoginRequest(BaseModel):
-    """Login request model."""
-    email: EmailStr
-    password: str = Field(..., min_length=8)
 
-class SignupRequest(BaseModel):
-    """Signup request model."""
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-    name: str = Field(..., min_length=2)
+class SignUpRequest(UserCredentials):
+    """Schema for user registration."""
+    name: str = Field(..., description="User's full name")
+
+
+class TokenResponse(BaseModel):
+    """Schema for token response."""
+    access_token: str = Field(..., description="JWT access token")
+    token_type: str = Field(default="bearer", description="Token type")
+    expires_in: int = Field(..., description="Token expiration time in seconds")
+
+
+class UserResponse(BaseModel):
+    """Schema for user response."""
+    id: str = Field(..., description="User ID")
+    email: EmailStr = Field(..., description="User's email")
+    name: str = Field(..., description="User's full name")
+    created_at: str = Field(..., description="Account creation timestamp")
+
+
+class AuthResponse(BaseModel):
+    """Schema for authentication response."""
+    user: UserResponse = Field(..., description="User data")
+    token: TokenResponse = Field(..., description="Authentication token")
+
 
 class PasswordResetRequest(BaseModel):
-    """Password reset request model."""
-    email: EmailStr
+    """Schema for password reset request."""
+    email: EmailStr = Field(..., description="User's email")
 
-class PasswordResetConfirmRequest(BaseModel):
-    """Password reset confirmation model."""
-    token: str
-    new_password: str = Field(..., min_length=8)
-    
-    @validator("new_password")
-    def password_strength(cls, v):
-        """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        
-        # Check for at least one lowercase letter
-        if not any(c.islower() for c in v):
-            raise ValueError("Password must contain at least one lowercase letter")
-        
-        # Check for at least one uppercase letter
-        if not any(c.isupper() for c in v):
-            raise ValueError("Password must contain at least one uppercase letter")
-        
-        # Check for at least one digit
-        if not any(c.isdigit() for c in v):
-            raise ValueError("Password must contain at least one digit")
-        
-        return v
 
-class TokenVerifyRequest(BaseModel):
-    """Token verification request model."""
-    token: str
-
-class LoginResponse(BaseModel):
-    """Login response model."""
-    token: Token
-    user: UserResponse
+class PasswordResetConfirm(BaseModel):
+    """Schema for password reset confirmation."""
+    token: str = Field(..., description="Password reset token")
+    new_password: str = Field(..., description="New password", min_length=8)
