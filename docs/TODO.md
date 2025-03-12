@@ -38,31 +38,48 @@
 - [x] Implement conversation list component
 - [x] Build chat container component
 - [x] Create main chat page
-- [ ] Implement message sending/receiving
-- [ ] Implement message history loading
+- [x] Implement message sending/receiving
+- [x] Implement message history loading
 - [x] Implement streaming message display
+- [x] Create conversation management (rename, delete, export)
+- [x] Implement API route for chat message streaming
 
 ### User Dashboard
-- [ ] Create dashboard layout
-- [ ] Implement insights summary cards
-- [ ] Create conversation history list
-- [ ] Implement settings panel
-- [ ] Create profile visualization
+- [x] Create dashboard layout
+- [x] Implement insights summary cards
+- [x] Create conversation history list
+- [x] Implement statistics display
+- [x] Create activity timeline
+
+### User Profile/Settings
+- [x] Create settings page layout
+- [x] Implement profile information management
+- [x] Add appearance settings section
+- [x] Add AI model preferences
+- [x] Implement account management options
+- [x] Create password change functionality
 
 ### Insights Page
 - [x] Design insights visualization components
 - [x] Create knowledge graph visualization
 - [x] Create insights summary cards
 - [x] Implement basic insights page
-- [ ] Implement insights filtering
-- [ ] Create insights export functionality
+- [x] Implement insights filtering
+- [x] Create insights export functionality
+- [x] Implement multiple view modes (list, graph, summary)
 
 ### Responsiveness & Design
 - [x] Implement responsive layout for mobile
 - [x] Implement dark mode toggle
 - [x] Add animations for UI interactions
-- [ ] Create loading states and skeletons
-- [ ] Implement error states and messages
+- [x] Create loading states and skeletons
+- [x] Implement error states and messages
+
+### Navigation
+- [x] Create main navigation component
+- [x] Implement mobile responsive menu
+- [x] Create user dropdown menu
+- [x] Add theme toggle
 
 ## Backend Development
 
